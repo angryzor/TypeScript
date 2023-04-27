@@ -35,7 +35,7 @@ import {
     compareDiagnostics,
     CompilerOptions,
     ConciseBody,
-    Constraint,
+    ConstraintNode,
     ConstructorDeclaration,
     ConstructorTypeNode,
     contains,
@@ -1278,7 +1278,7 @@ export function getEffectiveTypeParameterDeclarations(node: DeclarationWithTypeP
     return emptyArray;
 }
 
-export function getEffectiveConstraintOfTypeParameter(node: TypeParameterDeclaration): Constraint | undefined {
+export function getEffectiveConstraintOfTypeParameter(node: TypeParameterDeclaration): ConstraintNode | undefined {
     return node.constraint ? node.constraint :
         isJSDocTemplateTag(node.parent) && node === node.parent.typeParameters[0] ? node.parent.constraint :
         undefined;

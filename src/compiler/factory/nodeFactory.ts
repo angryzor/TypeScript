@@ -55,7 +55,7 @@ import {
     ConciseBody,
     ConditionalExpression,
     ConditionalTypeNode,
-    Constraint,
+    ConstraintNode,
     ConstructorDeclaration,
     ConstructorTypeNode,
     ConstructSignatureDeclaration,
@@ -1478,7 +1478,7 @@ export function createNodeFactory(flags: NodeFactoryFlags, baseFactory: BaseNode
     // Constraints
     //
 
-    function createBaseConstraint<T extends Constraint>(kind: T["kind"], type: TypeNode | undefined) {
+    function createBaseConstraintNode<T extends ConstraintNode>(kind: T["kind"], type: TypeNode | undefined) {
         const node = createBaseNode<T>(kind);
         node.type = type;
         return node;
@@ -1514,7 +1514,7 @@ export function createNodeFactory(flags: NodeFactoryFlags, baseFactory: BaseNode
 
     // @api
     function createTypeParameterConstraint(modifiers: readonly Modifier[] | undefined, type: TypeNode | undefined): TypeParameterConstraint {
-        const node = createBaseConstraint<TypeParameterConstraint>(SyntaxKind.TypeParameterConstraint, type);
+        const node = createBaseConstraintNode<TypeParameterConstraint>(SyntaxKind.TypeParameterConstraint, type);
         node.modifiers = asNodeArray(modifiers);
 
         node.expression = undefined; // initialized by parser to report grammar errors
@@ -5103,7 +5103,7 @@ export function createNodeFactory(flags: NodeFactoryFlags, baseFactory: BaseNode
 
     // @api
     function createJSDocConstraint(type: JSDocTypeExpression | undefined): JSDocConstraint {
-        return createBaseConstraint<JSDocConstraint>(SyntaxKind.JSDocConstraint, type);
+        return createBaseConstraintNode<JSDocConstraint>(SyntaxKind.JSDocConstraint, type);
     }
 
     // @api

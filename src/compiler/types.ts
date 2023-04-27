@@ -1819,11 +1819,11 @@ export interface Decorator extends Node {
     readonly expression: LeftHandSideExpression;
 }
 
-export interface Constraint extends Node {
+export interface ConstraintNode extends Node {
     readonly type?: TypeNode;
 }
 
-export interface TypeParameterConstraint extends Constraint {
+export interface TypeParameterConstraint extends ConstraintNode {
     readonly kind: SyntaxKind.TypeParameterConstraint;
     readonly modifiers?: NodeArray<Modifier>;
 
@@ -4051,7 +4051,7 @@ export interface JSDocTemplateTag extends JSDocTag {
     readonly typeParameters: NodeArray<TypeParameterDeclaration>;
 }
 
-export interface JSDocConstraint extends Constraint {
+export interface JSDocConstraint extends ConstraintNode {
     readonly kind: SyntaxKind.JSDocConstraint;
     readonly type: JSDocTypeExpression;
 }
