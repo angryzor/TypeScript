@@ -47,6 +47,7 @@ import {
     concatenate,
     ConditionalExpression,
     ConditionalTypeNode,
+    ConstraintDefinition,
     ConstructorDeclaration,
     ConstructorTypeNode,
     ConstructSignatureDeclaration,
@@ -507,7 +508,10 @@ const forEachChildTable: ForEachChildTable = {
         return visitNodes(cbNode, cbNodes, node.modifiers) ||
             visitNode(cbNode, node.name) ||
             visitNode(cbNode, node.constraint) ||
-            visitNode(cbNode, node.default) ||
+            visitNode(cbNode, node.default);
+    },
+    [SyntaxKind.ConstraintDefinition]: function forEachChildInConstraintDefinition<T>(node: ConstraintDefinition, cbNode: (node: Node) => T | undefined, _cbNodes?: (nodes: NodeArray<Node>) => T | undefined): T | undefined {
+        return visitNode(cbNode, node.type) ||
             visitNode(cbNode, node.expression);
     },
     [SyntaxKind.ShorthandPropertyAssignment]: function forEachChildInShorthandPropertyAssignment<T>(node: ShorthandPropertyAssignment, cbNode: (node: Node) => T | undefined, cbNodes?: (nodes: NodeArray<Node>) => T | undefined): T | undefined {
@@ -3851,35 +3855,70 @@ namespace Parser {
         return finishNode(factory.createTypeQueryNode(entityName, typeArguments), pos);
     }
 
+    function parseConstraintTransitivity(): boolean | undefined {
+        if (parseOptional(SyntaxKind.ExtendsKeyword)) {
+            return true
+        } else if (parseOptional(SyntaxKind.EqualsKeyword)) {
+            return false
+        } else {
+            return undefined
+        }
+    }
+
+    function parseConstraintDistributivity(): boolean {
+        if (parseOptional(SyntaxKind.OneofKeyword)) {
+            return true
+        } else {
+            return false
+        }
+    }
+
+    function parseConstraintDefinition(): ConstraintDefinition | undefined {
+        const transitive = parseConstraintTransitivity()
+
+        if (transitive === undefined) {
+            return undefined
+        }
+
+        const distributive = parseConstraintDistributivity()
+
+        let type: TypeNode | undefined
+        let expression: Expression | undefined
+
+        // It's not uncommon for people to write improper constraints to a generic.  If the
+        // user writes a constraint that is an expression and not an actual type, then parse
+        // it out as an expression (so we can recover well), but report that a type is needed
+        // instead.
+        if (isStartOfType() || !isStartOfExpression()) {
+            type = parseType()
+        }
+        else {
+            // It was not a type, and it looked like an expression.  Parse out an expression
+            // here so we recover well.  Note: it is important that we call parseUnaryExpression
+            // and not parseExpression here.  If the user has:
+            //
+            //      <T extends "">
+            //
+            // We do *not* want to consume the `>` as we're consuming the expression for "".
+            expression = parseUnaryExpressionOrHigher();
+        }
+
+        const node = factory.createConstraintDefinition(type, transitive, distributive)
+        node.expression = expression
+
+        return node
+    }
+
     function parseTypeParameter(): TypeParameterDeclaration {
         const pos = getNodePos();
         const modifiers = parseModifiers(/*allowDecorators*/ false, /*permitConstAsModifier*/ true);
         const name = parseIdentifier();
-        let constraint: TypeNode | undefined;
-        let expression: Expression | undefined;
-        if (parseOptional(SyntaxKind.ExtendsKeyword)) {
-            // It's not uncommon for people to write improper constraints to a generic.  If the
-            // user writes a constraint that is an expression and not an actual type, then parse
-            // it out as an expression (so we can recover well), but report that a type is needed
-            // instead.
-            if (isStartOfType() || !isStartOfExpression()) {
-                constraint = parseType();
-            }
-            else {
-                // It was not a type, and it looked like an expression.  Parse out an expression
-                // here so we recover well.  Note: it is important that we call parseUnaryExpression
-                // and not parseExpression here.  If the user has:
-                //
-                //      <T extends "">
-                //
-                // We do *not* want to consume the `>` as we're consuming the expression for "".
-                expression = parseUnaryExpressionOrHigher();
-            }
-        }
+
+        const constraint = parseConstraintDefinition()
 
         const defaultType = parseOptional(SyntaxKind.EqualsToken) ? parseType() : undefined;
         const node = factory.createTypeParameterDeclaration(modifiers, name, constraint, defaultType);
-        node.expression = expression;
+
         return finishNode(node, pos);
     }
 
@@ -4301,7 +4340,8 @@ namespace Parser {
         const name = parseIdentifierName();
         parseExpected(SyntaxKind.InKeyword);
         const type = parseType();
-        return finishNode(factory.createTypeParameterDeclaration(/*modifiers*/ undefined, name, type, /*defaultType*/ undefined), pos);
+        const constraint = factory.createConstraintDefinition(type, false, true);
+        return finishNode(factory.createTypeParameterDeclaration(/*modifiers*/ undefined, name, constraint, /*defaultType*/ undefined), pos);
     }
 
     function parseMappedType() {
@@ -4654,11 +4694,9 @@ namespace Parser {
     }
 
     function tryParseConstraintOfInferType() {
-        if (parseOptional(SyntaxKind.ExtendsKeyword)) {
-            const constraint = disallowConditionalTypesAnd(parseType);
-            if (inDisallowConditionalTypesContext() || token() !== SyntaxKind.QuestionToken) {
-                return constraint;
-            }
+        const constraint = disallowConditionalTypesAnd(parseConstraintDefinition);
+        if (inDisallowConditionalTypesContext() || token() !== SyntaxKind.QuestionToken) {
+            return constraint;
         }
     }
 

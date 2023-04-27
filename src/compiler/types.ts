@@ -150,6 +150,7 @@ export const enum SyntaxKind {
     DoKeyword,
     ElseKeyword,
     EnumKeyword,
+    EqualsKeyword,
     ExportKeyword,
     ExtendsKeyword,
     FalseKeyword,
@@ -162,6 +163,7 @@ export const enum SyntaxKind {
     InstanceOfKeyword,
     NewKeyword,
     NullKeyword,
+    OneofKeyword,
     ReturnKeyword,
     SuperKeyword,
     SwitchKeyword,
@@ -230,6 +232,7 @@ export const enum SyntaxKind {
     ComputedPropertyName,
     // Signature elements
     TypeParameter,
+    ConstraintDefinition,
     Parameter,
     Decorator,
     // TypeMember
@@ -609,6 +612,7 @@ export type KeywordSyntaxKind =
     | SyntaxKind.DoKeyword
     | SyntaxKind.ElseKeyword
     | SyntaxKind.EnumKeyword
+    | SyntaxKind.EqualsKeyword
     | SyntaxKind.ExportKeyword
     | SyntaxKind.ExtendsKeyword
     | SyntaxKind.FalseKeyword
@@ -637,6 +641,7 @@ export type KeywordSyntaxKind =
     | SyntaxKind.NumberKeyword
     | SyntaxKind.ObjectKeyword
     | SyntaxKind.OfKeyword
+    | SyntaxKind.OneofKeyword
     | SyntaxKind.PackageKeyword
     | SyntaxKind.PrivateKeyword
     | SyntaxKind.ProtectedKeyword
@@ -1031,6 +1036,7 @@ export type ForEachChildNodes =
 export type HasChildren =
     | QualifiedName
     | ComputedPropertyName
+    | ConstraintDefinition
     | TypeParameterDeclaration
     | ParameterDeclaration
     | Decorator
@@ -1801,17 +1807,24 @@ export interface Decorator extends Node {
     readonly expression: LeftHandSideExpression;
 }
 
+export interface ConstraintDefinition extends Node {
+    readonly kind: SyntaxKind.ConstraintDefinition
+    readonly transitive: boolean;
+    readonly distributive: boolean;
+    readonly type?: TypeNode;
+
+    // For error recovery purposes (see `isGrammarError` in utilities.ts).
+    expression?: Expression;
+}
+
 export interface TypeParameterDeclaration extends NamedDeclaration, JSDocContainer {
     readonly kind: SyntaxKind.TypeParameter;
     readonly parent: DeclarationWithTypeParameterChildren | InferTypeNode;
     readonly modifiers?: NodeArray<Modifier>;
     readonly name: Identifier;
     /** Note: Consider calling `getEffectiveConstraintOfTypeParameter` */
-    readonly constraint?: TypeNode;
+    readonly constraint?: ConstraintDefinition;
     readonly default?: TypeNode;
-
-    // For error recovery purposes (see `isGrammarError` in utilities.ts).
-    expression?: Expression;
 }
 
 export interface SignatureDeclarationBase extends NamedDeclaration, JSDocContainer {
@@ -8342,8 +8355,10 @@ export interface NodeFactory {
     // Signature elements
     //
 
-    createTypeParameterDeclaration(modifiers: readonly Modifier[] | undefined, name: string | Identifier, constraint?: TypeNode, defaultType?: TypeNode): TypeParameterDeclaration;
-    updateTypeParameterDeclaration(node: TypeParameterDeclaration, modifiers: readonly Modifier[] | undefined, name: Identifier, constraint: TypeNode | undefined, defaultType: TypeNode | undefined): TypeParameterDeclaration;
+    createTypeParameterDeclaration(modifiers: readonly Modifier[] | undefined, name: string | Identifier, constraint?: ConstraintDefinition, defaultType?: TypeNode): TypeParameterDeclaration;
+    updateTypeParameterDeclaration(node: TypeParameterDeclaration, modifiers: readonly Modifier[] | undefined, name: Identifier, constraint: ConstraintDefinition | undefined, defaultType: TypeNode | undefined): TypeParameterDeclaration;
+    createConstraintDefinition(type: TypeNode | undefined, transitive: boolean, distributive: boolean): ConstraintDefinition;
+    updateConstraintDefinition(node: ConstraintDefinition, type: TypeNode | undefined, transitive: boolean, distributive: boolean): ConstraintDefinition;
     createParameterDeclaration(modifiers: readonly ModifierLike[] | undefined, dotDotDotToken: DotDotDotToken | undefined, name: string | BindingName, questionToken?: QuestionToken, type?: TypeNode, initializer?: Expression): ParameterDeclaration;
     updateParameterDeclaration(node: ParameterDeclaration, modifiers: readonly ModifierLike[] | undefined, dotDotDotToken: DotDotDotToken | undefined, name: string | BindingName, questionToken: QuestionToken | undefined, type: TypeNode | undefined, initializer: Expression | undefined): ParameterDeclaration;
     createDecorator(expression: Expression): Decorator;

@@ -55,6 +55,7 @@ import {
     ConciseBody,
     ConditionalExpression,
     ConditionalTypeNode,
+    ConstraintDefinition,
     ConstructorDeclaration,
     ConstructorTypeNode,
     ConstructSignatureDeclaration,
@@ -556,6 +557,8 @@ export function createNodeFactory(flags: NodeFactoryFlags, baseFactory: BaseNode
         updateComputedPropertyName,
         createTypeParameterDeclaration,
         updateTypeParameterDeclaration,
+        createConstraintDefinition,
+        updateConstraintDefinition,
         createParameterDeclaration,
         updateParameterDeclaration,
         createDecorator,
@@ -1472,7 +1475,7 @@ export function createNodeFactory(flags: NodeFactoryFlags, baseFactory: BaseNode
     //
 
     // @api
-    function createTypeParameterDeclaration(modifiers: readonly Modifier[] | undefined, name: string | Identifier, constraint?: TypeNode, defaultType?: TypeNode): TypeParameterDeclaration {
+    function createTypeParameterDeclaration(modifiers: readonly Modifier[] | undefined, name: string | Identifier, constraint?: ConstraintDefinition, defaultType?: TypeNode): TypeParameterDeclaration {
         const node = createBaseDeclaration<TypeParameterDeclaration>(SyntaxKind.TypeParameter);
         node.modifiers = asNodeArray(modifiers);
         node.name = asName(name);
@@ -1480,18 +1483,37 @@ export function createNodeFactory(flags: NodeFactoryFlags, baseFactory: BaseNode
         node.default = defaultType;
         node.transformFlags = TransformFlags.ContainsTypeScript;
 
-        node.expression = undefined; // initialized by parser to report grammar errors
         node.jsDoc = undefined; // initialized by parser (JsDocContainer)
         return node;
     }
 
     // @api
-    function updateTypeParameterDeclaration(node: TypeParameterDeclaration, modifiers: readonly Modifier[] | undefined, name: Identifier, constraint: TypeNode | undefined, defaultType: TypeNode | undefined): TypeParameterDeclaration {
+    function updateTypeParameterDeclaration(node: TypeParameterDeclaration, modifiers: readonly Modifier[] | undefined, name: Identifier, constraint: ConstraintDefinition | undefined, defaultType: TypeNode | undefined): TypeParameterDeclaration {
         return node.modifiers !== modifiers
             || node.name !== name
             || node.constraint !== constraint
             || node.default !== defaultType
             ? update(createTypeParameterDeclaration(modifiers, name, constraint, defaultType), node)
+            : node;
+    }
+
+    // @api
+    function createConstraintDefinition(type: TypeNode | undefined, transitive: boolean, distributive: boolean): ConstraintDefinition {
+        const node = createBaseNode<ConstraintDefinition>(SyntaxKind.ConstraintDefinition);
+        node.type = type;
+        node.transitive = transitive;
+        node.distributive = distributive;
+
+        node.expression = undefined; // initialized by parser to report grammar errors
+        return node;
+    }
+
+    // @api
+    function updateConstraintDefinition(node: ConstraintDefinition, type: TypeNode | undefined, transitive: boolean, distributive: boolean): ConstraintDefinition {
+        return node.type !== type
+            || node.transitive !== transitive
+            || node.distributive !== distributive
+            ? update(createConstraintDefinition(type, transitive, distributive), node)
             : node;
     }
 
