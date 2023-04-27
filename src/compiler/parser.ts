@@ -47,7 +47,6 @@ import {
     concatenate,
     ConditionalExpression,
     ConditionalTypeNode,
-    ConstraintDefinition,
     ConstructorDeclaration,
     ConstructorTypeNode,
     ConstructSignatureDeclaration,
@@ -171,6 +170,7 @@ import {
     JSDocCallbackTag,
     JSDocClassTag,
     JSDocComment,
+    JSDocConstraint,
     JSDocDeprecatedTag,
     JSDocEnumTag,
     JSDocFunctionType,
@@ -381,6 +381,7 @@ import {
     TypeNode,
     TypeOfExpression,
     TypeOperatorNode,
+    TypeParameterConstraint,
     TypeParameterDeclaration,
     TypePredicateNode,
     TypeQueryNode,
@@ -510,8 +511,9 @@ const forEachChildTable: ForEachChildTable = {
             visitNode(cbNode, node.constraint) ||
             visitNode(cbNode, node.default);
     },
-    [SyntaxKind.ConstraintDefinition]: function forEachChildInConstraintDefinition<T>(node: ConstraintDefinition, cbNode: (node: Node) => T | undefined, _cbNodes?: (nodes: NodeArray<Node>) => T | undefined): T | undefined {
-        return visitNode(cbNode, node.type) ||
+    [SyntaxKind.TypeParameterConstraint]: function forEachChildInTypeParameterConstraint<T>(node: TypeParameterConstraint, cbNode: (node: Node) => T | undefined, cbNodes?: (nodes: NodeArray<Node>) => T | undefined): T | undefined {
+        return visitNodes(cbNode, cbNodes, node.modifiers) ||
+            visitNode(cbNode, node.type) ||
             visitNode(cbNode, node.expression);
     },
     [SyntaxKind.ShorthandPropertyAssignment]: function forEachChildInShorthandPropertyAssignment<T>(node: ShorthandPropertyAssignment, cbNode: (node: Node) => T | undefined, cbNodes?: (nodes: NodeArray<Node>) => T | undefined): T | undefined {
@@ -1087,6 +1089,9 @@ const forEachChildTable: ForEachChildTable = {
             visitNode(cbNode, node.constraint) ||
             visitNodes(cbNode, cbNodes, node.typeParameters) ||
             (typeof node.comment === "string" ? undefined : visitNodes(cbNode, cbNodes, node.comment));
+    },
+    [SyntaxKind.JSDocConstraint]: function forEachChildInJSDocConstraint<T>(node: JSDocConstraint, cbNode: (node: Node) => T | undefined, _cbNodes?: (nodes: NodeArray<Node>) => T | undefined): T | undefined {
+        return visitNode(cbNode, node.type);
     },
     [SyntaxKind.JSDocTypedefTag]: function forEachChildInJSDocTypedefTag<T>(node: JSDocTypedefTag, cbNode: (node: Node) => T | undefined, cbNodes?: (nodes: NodeArray<Node>) => T | undefined): T | undefined {
         return visitNode(cbNode, node.tagName) ||
@@ -3855,35 +3860,13 @@ namespace Parser {
         return finishNode(factory.createTypeQueryNode(entityName, typeArguments), pos);
     }
 
-    function parseConstraintTransitivity(): boolean | undefined {
-        if (parseOptional(SyntaxKind.ExtendsKeyword)) {
-            return true;
-        }
-        else if (parseOptional(SyntaxKind.EqualsKeyword)) {
-            return false;
-        }
-        else {
+    function parseTypeParameterConstraint(): TypeParameterConstraint | undefined {
+        const pos = getNodePos();
+        const modifiers = parseModifiers(/*allowDecorators*/ false, /*permitConstAsModifier*/ false);
+
+        if (modifiers === undefined) {
             return undefined;
         }
-    }
-
-    function parseConstraintDistributivity(): boolean {
-        if (parseOptional(SyntaxKind.OneofKeyword)) {
-            return true;
-        }
-        else {
-            return false;
-        }
-    }
-
-    function parseConstraintDefinition(): ConstraintDefinition | undefined {
-        const transitive = parseConstraintTransitivity();
-
-        if (transitive === undefined) {
-            return undefined;
-        }
-
-        const distributive = parseConstraintDistributivity();
 
         let type: TypeNode | undefined;
         let expression: Expression | undefined;
@@ -3906,10 +3889,10 @@ namespace Parser {
             expression = parseUnaryExpressionOrHigher();
         }
 
-        const node = factory.createConstraintDefinition(type, transitive, distributive);
+        const node = factory.createTypeParameterConstraint(modifiers, type);
         node.expression = expression;
 
-        return node;
+        return finishNode(node, pos);
     }
 
     function parseTypeParameter(): TypeParameterDeclaration {
@@ -3917,7 +3900,7 @@ namespace Parser {
         const modifiers = parseModifiers(/*allowDecorators*/ false, /*permitConstAsModifier*/ true);
         const name = parseIdentifier();
 
-        const constraint = parseConstraintDefinition();
+        const constraint = parseTypeParameterConstraint();
 
         const defaultType = parseOptional(SyntaxKind.EqualsToken) ? parseType() : undefined;
         const node = factory.createTypeParameterDeclaration(modifiers, name, constraint, defaultType);
@@ -4342,8 +4325,9 @@ namespace Parser {
         const pos = getNodePos();
         const name = parseIdentifierName();
         parseExpected(SyntaxKind.InKeyword);
+        const constraintPos = getNodePos();
         const type = parseType();
-        const constraint = factory.createConstraintDefinition(type, /*transitive*/ false, /*distributive*/ true);
+        const constraint = finishNode(factory.createTypeParameterConstraint(/*modifiers*/ undefined, type), constraintPos);
         return finishNode(factory.createTypeParameterDeclaration(/*modifiers*/ undefined, name, constraint, /*defaultType*/ undefined), pos);
     }
 
@@ -4697,7 +4681,7 @@ namespace Parser {
     }
 
     function tryParseConstraintOfInferType() {
-        const constraint = disallowConditionalTypesAnd(parseConstraintDefinition);
+        const constraint = disallowConditionalTypesAnd(parseTypeParameterConstraint);
         if (inDisallowConditionalTypesContext() || token() !== SyntaxKind.QuestionToken) {
             return constraint;
         }
@@ -9565,6 +9549,12 @@ namespace Parser {
                 return createNodeArray(typeParameters, pos);
             }
 
+            function parseJSDocConstraint(): JSDocConstraint {
+                const pos = getNodePos();
+                const node = factory.createJSDocConstraint(parseJSDocTypeExpression());
+                return finishNode(node, pos);
+            }
+
             function parseTemplateTag(start: number, tagName: Identifier, indent: number, indentText: string): JSDocTemplateTag {
                 // The template tag looks like one of the following:
                 //   @template T,U,V
@@ -9577,7 +9567,7 @@ namespace Parser {
                 // TODO: Determine whether we should enforce this in the checker.
                 // TODO: Consider moving the `constraint` to the first type parameter as we could then remove `getEffectiveConstraintOfTypeParameter`.
                 // TODO: Consider only parsing a single type parameter if there is a constraint.
-                const constraint = token() === SyntaxKind.OpenBraceToken ? factory.createConstraintDefinition(parseJSDocTypeExpression(), /*transitive*/ true, /*distributive*/ false) : undefined;
+                const constraint = token() === SyntaxKind.OpenBraceToken ? parseJSDocConstraint() : undefined;
                 const typeParameters = parseTemplateTagTypeParameters();
                 return finishNode(factory.createJSDocTemplateTag(tagName, constraint, typeParameters, parseTrailingTagComments(start, getNodePos(), indent, indentText)), start);
             }

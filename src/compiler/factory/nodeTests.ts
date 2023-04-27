@@ -212,6 +212,7 @@ import {
     TypeLiteralNode,
     TypeOfExpression,
     TypeOperatorNode,
+    TypeParameterConstraint,
     TypeParameterDeclaration,
     TypePredicateNode,
     TypeQueryNode,
@@ -400,6 +401,10 @@ export function isComputedPropertyName(node: Node): node is ComputedPropertyName
 
 export function isTypeParameterDeclaration(node: Node): node is TypeParameterDeclaration {
     return node.kind === SyntaxKind.TypeParameter;
+}
+
+export function isTypeParameterConstraint(node: Node): node is TypeParameterConstraint {
+    return node.kind === SyntaxKind.TypeParameterConstraint;
 }
 
 // TODO(rbuckton): Rename to 'isParameterDeclaration'

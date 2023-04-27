@@ -232,7 +232,7 @@ export const enum SyntaxKind {
     ComputedPropertyName,
     // Signature elements
     TypeParameter,
-    ConstraintDefinition,
+    TypeParameterConstraint,
     Parameter,
     Decorator,
     // TypeMember
@@ -403,6 +403,7 @@ export const enum SyntaxKind {
 
     // JSDoc nodes
     JSDocTypeExpression,
+    JSDocConstraint,
     JSDocNameReference,
     JSDocMemberName, // C#p
     JSDocAllType, // The * type
@@ -647,6 +648,7 @@ export type KeywordSyntaxKind =
     | SyntaxKind.ProtectedKeyword
     | SyntaxKind.PublicKeyword
     | SyntaxKind.ReadonlyKeyword
+    | SyntaxKind.OneofKeyword
     | SyntaxKind.OutKeyword
     | SyntaxKind.OverrideKeyword
     | SyntaxKind.RequireKeyword
@@ -681,12 +683,15 @@ export type ModifierSyntaxKind =
     | SyntaxKind.ConstKeyword
     | SyntaxKind.DeclareKeyword
     | SyntaxKind.DefaultKeyword
+    | SyntaxKind.EqualsKeyword
     | SyntaxKind.ExportKeyword
+    | SyntaxKind.ExtendsKeyword
     | SyntaxKind.InKeyword
     | SyntaxKind.PrivateKeyword
     | SyntaxKind.ProtectedKeyword
     | SyntaxKind.PublicKeyword
     | SyntaxKind.ReadonlyKeyword
+    | SyntaxKind.OneofKeyword
     | SyntaxKind.OutKeyword
     | SyntaxKind.OverrideKeyword
     | SyntaxKind.StaticKeyword
@@ -998,6 +1003,7 @@ export type ForEachChildNodes =
     | JSDocOptionalType
     | JSDocVariadicType
     | JSDocFunctionType
+    | JSDocConstraint
     | JSDoc
     | JSDocSeeTag
     | JSDocNameReference
@@ -1036,7 +1042,7 @@ export type ForEachChildNodes =
 export type HasChildren =
     | QualifiedName
     | ComputedPropertyName
-    | ConstraintDefinition
+    | TypeParameterConstraint
     | TypeParameterDeclaration
     | ParameterDeclaration
     | Decorator
@@ -1621,8 +1627,11 @@ export type AsyncKeyword = ModifierToken<SyntaxKind.AsyncKeyword>;
 export type ConstKeyword = ModifierToken<SyntaxKind.ConstKeyword>;
 export type DeclareKeyword = ModifierToken<SyntaxKind.DeclareKeyword>;
 export type DefaultKeyword = ModifierToken<SyntaxKind.DefaultKeyword>;
+export type EqualsKeyword = ModifierToken<SyntaxKind.EqualsKeyword>;
 export type ExportKeyword = ModifierToken<SyntaxKind.ExportKeyword>;
+export type ExtendsKeyword = ModifierToken<SyntaxKind.ExtendsKeyword>;
 export type InKeyword = ModifierToken<SyntaxKind.InKeyword>;
+export type OneofKeyword = ModifierToken<SyntaxKind.OneofKeyword>;
 export type PrivateKeyword = ModifierToken<SyntaxKind.PrivateKeyword>;
 export type ProtectedKeyword = ModifierToken<SyntaxKind.ProtectedKeyword>;
 export type PublicKeyword = ModifierToken<SyntaxKind.PublicKeyword>;
@@ -1638,11 +1647,14 @@ export type Modifier =
     | ConstKeyword
     | DeclareKeyword
     | DefaultKeyword
+    | EqualsKeyword
     | ExportKeyword
+    | ExtendsKeyword
     | InKeyword
     | PrivateKeyword
     | ProtectedKeyword
     | PublicKeyword
+    | OneofKeyword
     | OutKeyword
     | OverrideKeyword
     | ReadonlyKeyword
@@ -1807,11 +1819,13 @@ export interface Decorator extends Node {
     readonly expression: LeftHandSideExpression;
 }
 
-export interface ConstraintDefinition extends Node {
-    readonly kind: SyntaxKind.ConstraintDefinition
-    readonly transitive: boolean;
-    readonly distributive: boolean;
+export interface Constraint extends Node {
     readonly type?: TypeNode;
+}
+
+export interface TypeParameterConstraint extends Constraint {
+    readonly kind: SyntaxKind.TypeParameterConstraint;
+    readonly modifiers?: NodeArray<Modifier>;
 
     // For error recovery purposes (see `isGrammarError` in utilities.ts).
     expression?: Expression;
@@ -1823,7 +1837,7 @@ export interface TypeParameterDeclaration extends NamedDeclaration, JSDocContain
     readonly modifiers?: NodeArray<Modifier>;
     readonly name: Identifier;
     /** Note: Consider calling `getEffectiveConstraintOfTypeParameter` */
-    readonly constraint?: ConstraintDefinition;
+    readonly constraint?: TypeParameterConstraint;
     readonly default?: TypeNode;
 }
 
@@ -4033,8 +4047,13 @@ export interface JSDocThisTag extends JSDocTag {
 
 export interface JSDocTemplateTag extends JSDocTag {
     readonly kind: SyntaxKind.JSDocTemplateTag;
-    readonly constraint: JSDocTypeExpression | undefined;
+    readonly constraint: JSDocConstraint | undefined;
     readonly typeParameters: NodeArray<TypeParameterDeclaration>;
+}
+
+export interface JSDocConstraint extends Constraint {
+    readonly kind: SyntaxKind.JSDocConstraint;
+    readonly type: JSDocTypeExpression;
 }
 
 export interface JSDocSeeTag extends JSDocTag {
@@ -8355,10 +8374,10 @@ export interface NodeFactory {
     // Signature elements
     //
 
-    createTypeParameterDeclaration(modifiers: readonly Modifier[] | undefined, name: string | Identifier, constraint?: ConstraintDefinition, defaultType?: TypeNode): TypeParameterDeclaration;
-    updateTypeParameterDeclaration(node: TypeParameterDeclaration, modifiers: readonly Modifier[] | undefined, name: Identifier, constraint: ConstraintDefinition | undefined, defaultType: TypeNode | undefined): TypeParameterDeclaration;
-    createConstraintDefinition(type: TypeNode | undefined, transitive: boolean, distributive: boolean): ConstraintDefinition;
-    updateConstraintDefinition(node: ConstraintDefinition, type: TypeNode | undefined, transitive: boolean, distributive: boolean): ConstraintDefinition;
+    createTypeParameterDeclaration(modifiers: readonly Modifier[] | undefined, name: string | Identifier, constraint?: TypeParameterConstraint, defaultType?: TypeNode): TypeParameterDeclaration;
+    updateTypeParameterDeclaration(node: TypeParameterDeclaration, modifiers: readonly Modifier[] | undefined, name: Identifier, constraint: TypeParameterConstraint | undefined, defaultType: TypeNode | undefined): TypeParameterDeclaration;
+    createTypeParameterConstraint(modifiers: readonly Modifier[] | undefined, type: TypeNode | undefined): TypeParameterConstraint;
+    updateTypeParameterConstraint(node: TypeParameterConstraint, modifiers: readonly Modifier[] | undefined, type: TypeNode | undefined): TypeParameterConstraint;
     createParameterDeclaration(modifiers: readonly ModifierLike[] | undefined, dotDotDotToken: DotDotDotToken | undefined, name: string | BindingName, questionToken?: QuestionToken, type?: TypeNode, initializer?: Expression): ParameterDeclaration;
     updateParameterDeclaration(node: ParameterDeclaration, modifiers: readonly ModifierLike[] | undefined, dotDotDotToken: DotDotDotToken | undefined, name: string | BindingName, questionToken: QuestionToken | undefined, type: TypeNode | undefined, initializer: Expression | undefined): ParameterDeclaration;
     createDecorator(expression: Expression): Decorator;
@@ -8679,8 +8698,10 @@ export interface NodeFactory {
     updateJSDocTypeLiteral(node: JSDocTypeLiteral, jsDocPropertyTags: readonly JSDocPropertyLikeTag[] | undefined, isArrayType: boolean | undefined): JSDocTypeLiteral;
     createJSDocSignature(typeParameters: readonly JSDocTemplateTag[] | undefined, parameters: readonly JSDocParameterTag[], type?: JSDocReturnTag): JSDocSignature;
     updateJSDocSignature(node: JSDocSignature, typeParameters: readonly JSDocTemplateTag[] | undefined, parameters: readonly JSDocParameterTag[], type: JSDocReturnTag | undefined): JSDocSignature;
-    createJSDocTemplateTag(tagName: Identifier | undefined, constraint: JSDocTypeExpression | undefined, typeParameters: readonly TypeParameterDeclaration[], comment?: string | NodeArray<JSDocComment>): JSDocTemplateTag;
-    updateJSDocTemplateTag(node: JSDocTemplateTag, tagName: Identifier | undefined, constraint: JSDocTypeExpression | undefined, typeParameters: readonly TypeParameterDeclaration[], comment: string | NodeArray<JSDocComment> | undefined): JSDocTemplateTag;
+    createJSDocConstraint(type: JSDocTypeExpression | undefined): JSDocConstraint;
+    updateJSDocConstraint(node: JSDocConstraint, type: JSDocTypeExpression | undefined): JSDocConstraint;
+    createJSDocTemplateTag(tagName: Identifier | undefined, constraint: JSDocConstraint | undefined, typeParameters: readonly TypeParameterDeclaration[], comment?: string | NodeArray<JSDocComment>): JSDocTemplateTag;
+    updateJSDocTemplateTag(node: JSDocTemplateTag, tagName: Identifier | undefined, constraint: JSDocConstraint | undefined, typeParameters: readonly TypeParameterDeclaration[], comment: string | NodeArray<JSDocComment> | undefined): JSDocTemplateTag;
     createJSDocTypedefTag(tagName: Identifier | undefined, typeExpression?: JSDocTypeExpression | JSDocTypeLiteral, fullName?: Identifier | JSDocNamespaceDeclaration, comment?: string | NodeArray<JSDocComment>): JSDocTypedefTag;
     updateJSDocTypedefTag(node: JSDocTypedefTag, tagName: Identifier | undefined, typeExpression: JSDocTypeExpression | JSDocTypeLiteral | undefined, fullName: Identifier | JSDocNamespaceDeclaration | undefined, comment: string | NodeArray<JSDocComment> | undefined): JSDocTypedefTag;
     createJSDocParameterTag(tagName: Identifier | undefined, name: EntityName, isBracketed: boolean, typeExpression?: JSDocTypeExpression, isNameFirst?: boolean, comment?: string | NodeArray<JSDocComment>): JSDocParameterTag;

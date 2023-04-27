@@ -258,6 +258,7 @@ import {
     JSDocAugmentsTag,
     JSDocCallbackTag,
     JSDocComment,
+    JSDocConstraint,
     JSDocEnumTag,
     JSDocFunctionType,
     JSDocImplementsTag,
@@ -4406,9 +4407,13 @@ export function createPrinter(printerOptions: PrinterOptions = {}, handlers: Pri
         emitJSDocComment(tag.comment);
     }
 
+    function emitJSDocConstraint(node: JSDocConstraint | undefined) {
+        emitJSDocTypeExpression(node?.type);
+    }
+
     function emitJSDocTemplateTag(tag: JSDocTemplateTag) {
         emitJSDocTagName(tag.tagName);
-        emitJSDocTypeExpression(tag.constraint);
+        emitJSDocConstraint(tag.constraint);
         writeSpace();
         emitList(tag, tag.typeParameters, ListFormat.CommaListElements);
         emitJSDocComment(tag.comment);

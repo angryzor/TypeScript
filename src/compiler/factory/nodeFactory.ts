@@ -55,7 +55,7 @@ import {
     ConciseBody,
     ConditionalExpression,
     ConditionalTypeNode,
-    ConstraintDefinition,
+    Constraint,
     ConstructorDeclaration,
     ConstructorTypeNode,
     ConstructSignatureDeclaration,
@@ -226,6 +226,7 @@ import {
     JSDocCallbackTag,
     JSDocClassTag,
     JSDocComment,
+    JSDocConstraint,
     JSDocDeprecatedTag,
     JSDocEnumTag,
     JSDocFunctionType,
@@ -448,6 +449,7 @@ import {
     TypeOfExpression,
     TypeOfTag,
     TypeOperatorNode,
+    TypeParameterConstraint,
     TypeParameterDeclaration,
     TypePredicateNode,
     TypeQueryNode,
@@ -557,8 +559,8 @@ export function createNodeFactory(flags: NodeFactoryFlags, baseFactory: BaseNode
         updateComputedPropertyName,
         createTypeParameterDeclaration,
         updateTypeParameterDeclaration,
-        createConstraintDefinition,
-        updateConstraintDefinition,
+        createTypeParameterConstraint,
+        updateTypeParameterConstraint,
         createParameterDeclaration,
         updateParameterDeclaration,
         createDecorator,
@@ -826,6 +828,8 @@ export function createNodeFactory(flags: NodeFactoryFlags, baseFactory: BaseNode
         updateJSDocTypeExpression,
         createJSDocSignature,
         updateJSDocSignature,
+        createJSDocConstraint,
+        updateJSDocConstraint,
         createJSDocTemplateTag,
         updateJSDocTemplateTag,
         createJSDocTypedefTag,
@@ -1471,11 +1475,22 @@ export function createNodeFactory(flags: NodeFactoryFlags, baseFactory: BaseNode
     }
 
     //
+    // Constraints
+    //
+
+    function createBaseConstraint<T extends Constraint>(kind: T["kind"], type: TypeNode | undefined) {
+        const node = createBaseNode<T>(kind);
+        node.type = type;
+        return node;
+    }
+
+
+    //
     // Signature elements
     //
 
     // @api
-    function createTypeParameterDeclaration(modifiers: readonly Modifier[] | undefined, name: string | Identifier, constraint?: ConstraintDefinition, defaultType?: TypeNode): TypeParameterDeclaration {
+    function createTypeParameterDeclaration(modifiers: readonly Modifier[] | undefined, name: string | Identifier, constraint?: TypeParameterConstraint, defaultType?: TypeNode): TypeParameterDeclaration {
         const node = createBaseDeclaration<TypeParameterDeclaration>(SyntaxKind.TypeParameter);
         node.modifiers = asNodeArray(modifiers);
         node.name = asName(name);
@@ -1488,7 +1503,7 @@ export function createNodeFactory(flags: NodeFactoryFlags, baseFactory: BaseNode
     }
 
     // @api
-    function updateTypeParameterDeclaration(node: TypeParameterDeclaration, modifiers: readonly Modifier[] | undefined, name: Identifier, constraint: ConstraintDefinition | undefined, defaultType: TypeNode | undefined): TypeParameterDeclaration {
+    function updateTypeParameterDeclaration(node: TypeParameterDeclaration, modifiers: readonly Modifier[] | undefined, name: Identifier, constraint: TypeParameterConstraint | undefined, defaultType: TypeNode | undefined): TypeParameterDeclaration {
         return node.modifiers !== modifiers
             || node.name !== name
             || node.constraint !== constraint
@@ -1498,22 +1513,19 @@ export function createNodeFactory(flags: NodeFactoryFlags, baseFactory: BaseNode
     }
 
     // @api
-    function createConstraintDefinition(type: TypeNode | undefined, transitive: boolean, distributive: boolean): ConstraintDefinition {
-        const node = createBaseNode<ConstraintDefinition>(SyntaxKind.ConstraintDefinition);
-        node.type = type;
-        node.transitive = transitive;
-        node.distributive = distributive;
+    function createTypeParameterConstraint(modifiers: readonly Modifier[] | undefined, type: TypeNode | undefined): TypeParameterConstraint {
+        const node = createBaseConstraint<TypeParameterConstraint>(SyntaxKind.TypeParameterConstraint, type);
+        node.modifiers = asNodeArray(modifiers);
 
         node.expression = undefined; // initialized by parser to report grammar errors
         return node;
     }
 
     // @api
-    function updateConstraintDefinition(node: ConstraintDefinition, type: TypeNode | undefined, transitive: boolean, distributive: boolean): ConstraintDefinition {
-        return node.type !== type
-            || node.transitive !== transitive
-            || node.distributive !== distributive
-            ? update(createConstraintDefinition(type, transitive, distributive), node)
+    function updateTypeParameterConstraint(node: TypeParameterConstraint, modifiers: readonly Modifier[] | undefined, type: TypeNode | undefined): TypeParameterConstraint {
+        return node.modifiers !== modifiers
+            || node.type !== type
+            ? update(createTypeParameterConstraint(modifiers, type), node)
             : node;
     }
 
@@ -5090,7 +5102,19 @@ export function createNodeFactory(flags: NodeFactoryFlags, baseFactory: BaseNode
     }
 
     // @api
-    function createJSDocTemplateTag(tagName: Identifier | undefined, constraint: JSDocTypeExpression | undefined, typeParameters: readonly TypeParameterDeclaration[], comment?: string | NodeArray<JSDocComment>): JSDocTemplateTag {
+    function createJSDocConstraint(type: JSDocTypeExpression | undefined): JSDocConstraint {
+        return createBaseConstraint<JSDocConstraint>(SyntaxKind.JSDocConstraint, type);
+    }
+
+    // @api
+    function updateJSDocConstraint(node: JSDocConstraint, type: JSDocTypeExpression | undefined): JSDocConstraint {
+        return node.type !== type
+            ? update(createJSDocConstraint(type), node)
+            : node;
+    }
+
+    // @api
+    function createJSDocTemplateTag(tagName: Identifier | undefined, constraint: JSDocConstraint | undefined, typeParameters: readonly TypeParameterDeclaration[], comment?: string | NodeArray<JSDocComment>): JSDocTemplateTag {
         const node = createBaseJSDocTag<JSDocTemplateTag>(SyntaxKind.JSDocTemplateTag, tagName ?? createIdentifier("template"), comment);
         node.constraint = constraint;
         node.typeParameters = createNodeArray(typeParameters);
@@ -5098,7 +5122,7 @@ export function createNodeFactory(flags: NodeFactoryFlags, baseFactory: BaseNode
     }
 
     // @api
-    function updateJSDocTemplateTag(node: JSDocTemplateTag, tagName: Identifier = getDefaultTagName(node), constraint: JSDocTypeExpression | undefined, typeParameters: readonly TypeParameterDeclaration[], comment: string | NodeArray<JSDocComment> | undefined): JSDocTemplateTag {
+    function updateJSDocTemplateTag(node: JSDocTemplateTag, tagName: Identifier = getDefaultTagName(node), constraint: JSDocConstraint | undefined, typeParameters: readonly TypeParameterDeclaration[], comment: string | NodeArray<JSDocComment> | undefined): JSDocTemplateTag {
         return node.tagName !== tagName
             || node.constraint !== constraint
             || node.typeParameters !== typeParameters

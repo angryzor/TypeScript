@@ -608,7 +608,7 @@ export function createParenthesizerRules(factory: NodeFactory): ParenthesizerRul
         if (isConditionalTypeNode(type)) return hasJSDocPostfixQuestion(type.falseType);
         if (isUnionTypeNode(type)) return hasJSDocPostfixQuestion(last(type.types));
         if (isIntersectionTypeNode(type)) return hasJSDocPostfixQuestion(last(type.types));
-        if (isInferTypeNode(type)) return !!type.typeParameter.constraint && hasJSDocPostfixQuestion(type.typeParameter.constraint);
+        if (isInferTypeNode(type)) return !!type.typeParameter.constraint?.type && hasJSDocPostfixQuestion(type.typeParameter.constraint.type);
         return false;
     }
 

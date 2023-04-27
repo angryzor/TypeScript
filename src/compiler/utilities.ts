@@ -336,6 +336,7 @@ import {
     isTypeElement,
     isTypeLiteralNode,
     isTypeNode,
+    isTypeParameterConstraint,
     isTypeParameterDeclaration,
     isTypeReferenceNode,
     isVariableDeclaration,
@@ -981,7 +982,7 @@ export function nodeIsPresent(node: Node | undefined): boolean {
  * @internal
  */
 export function isGrammarError(parent: Node, child: Node | NodeArray<Node>) {
-    if (isTypeParameterDeclaration(parent)) return child === parent.expression;
+    if (isTypeParameterConstraint(parent)) return child === parent.expression;
     if (isClassStaticBlockDeclaration(parent)) return child === parent.modifiers;
     if (isPropertySignature(parent)) return child === parent.initializer;
     if (isPropertyDeclaration(parent)) return child === parent.questionToken && isAutoAccessorPropertyDeclaration(parent);

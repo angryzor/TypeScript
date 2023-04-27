@@ -82,6 +82,7 @@ import {
     isTemplateSpan,
     isTypeElement,
     isTypeNode,
+    isTypeParameterConstraint,
     isTypeParameterDeclaration,
     isVariableDeclaration,
     isVariableDeclarationList,
@@ -645,8 +646,14 @@ const visitEachChildTable: VisitEachChildTable = {
         return context.factory.updateTypeParameterDeclaration(node,
             nodesVisitor(node.modifiers, visitor, isModifier),
             Debug.checkDefined(nodeVisitor(node.name, visitor, isIdentifier)),
-            nodeVisitor(node.constraint, visitor, isTypeNode),
+            nodeVisitor(node.constraint, visitor, isTypeParameterConstraint),
             nodeVisitor(node.default, visitor, isTypeNode));
+    },
+
+    [SyntaxKind.TypeParameterConstraint]: function visitEachChildOfConstraint(node, visitor, context, nodesVisitor, nodeVisitor, _tokenVisitor) {
+        return context.factory.updateTypeParameterConstraint(node,
+            nodesVisitor(node.modifiers, visitor, isModifier),
+            nodeVisitor(node.type, visitor, isTypeNode));
     },
 
     [SyntaxKind.Parameter]: function visitEachChildOfParameterDeclaration(node, visitor, context, nodesVisitor, nodeVisitor, tokenVisitor) {
