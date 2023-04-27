@@ -1837,7 +1837,7 @@ export interface TypeParameterDeclaration extends NamedDeclaration, JSDocContain
     readonly modifiers?: NodeArray<Modifier>;
     readonly name: Identifier;
     /** Note: Consider calling `getEffectiveConstraintOfTypeParameter` */
-    readonly constraint?: TypeParameterConstraint;
+    readonly constraint?: ConstraintNode;
     readonly default?: TypeNode;
 }
 
@@ -8374,8 +8374,8 @@ export interface NodeFactory {
     // Signature elements
     //
 
-    createTypeParameterDeclaration(modifiers: readonly Modifier[] | undefined, name: string | Identifier, constraint?: TypeParameterConstraint, defaultType?: TypeNode): TypeParameterDeclaration;
-    updateTypeParameterDeclaration(node: TypeParameterDeclaration, modifiers: readonly Modifier[] | undefined, name: Identifier, constraint: TypeParameterConstraint | undefined, defaultType: TypeNode | undefined): TypeParameterDeclaration;
+    createTypeParameterDeclaration(modifiers: readonly Modifier[] | undefined, name: string | Identifier, constraint?: ConstraintNode, defaultType?: TypeNode): TypeParameterDeclaration;
+    updateTypeParameterDeclaration(node: TypeParameterDeclaration, modifiers: readonly Modifier[] | undefined, name: Identifier, constraint: ConstraintNode | undefined, defaultType: TypeNode | undefined): TypeParameterDeclaration;
     createTypeParameterConstraint(modifiers: readonly Modifier[] | undefined, type: TypeNode | undefined): TypeParameterConstraint;
     updateTypeParameterConstraint(node: TypeParameterConstraint, modifiers: readonly Modifier[] | undefined, type: TypeNode | undefined): TypeParameterConstraint;
     createParameterDeclaration(modifiers: readonly ModifierLike[] | undefined, dotDotDotToken: DotDotDotToken | undefined, name: string | BindingName, questionToken?: QuestionToken, type?: TypeNode, initializer?: Expression): ParameterDeclaration;

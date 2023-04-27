@@ -1490,7 +1490,7 @@ export function createNodeFactory(flags: NodeFactoryFlags, baseFactory: BaseNode
     //
 
     // @api
-    function createTypeParameterDeclaration(modifiers: readonly Modifier[] | undefined, name: string | Identifier, constraint?: TypeParameterConstraint, defaultType?: TypeNode): TypeParameterDeclaration {
+    function createTypeParameterDeclaration(modifiers: readonly Modifier[] | undefined, name: string | Identifier, constraint?: ConstraintNode, defaultType?: TypeNode): TypeParameterDeclaration {
         const node = createBaseDeclaration<TypeParameterDeclaration>(SyntaxKind.TypeParameter);
         node.modifiers = asNodeArray(modifiers);
         node.name = asName(name);
@@ -1503,7 +1503,7 @@ export function createNodeFactory(flags: NodeFactoryFlags, baseFactory: BaseNode
     }
 
     // @api
-    function updateTypeParameterDeclaration(node: TypeParameterDeclaration, modifiers: readonly Modifier[] | undefined, name: Identifier, constraint: TypeParameterConstraint | undefined, defaultType: TypeNode | undefined): TypeParameterDeclaration {
+    function updateTypeParameterDeclaration(node: TypeParameterDeclaration, modifiers: readonly Modifier[] | undefined, name: Identifier, constraint: ConstraintNode | undefined, defaultType: TypeNode | undefined): TypeParameterDeclaration {
         return node.modifiers !== modifiers
             || node.name !== name
             || node.constraint !== constraint
