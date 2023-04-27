@@ -3857,40 +3857,43 @@ namespace Parser {
 
     function parseConstraintTransitivity(): boolean | undefined {
         if (parseOptional(SyntaxKind.ExtendsKeyword)) {
-            return true
-        } else if (parseOptional(SyntaxKind.EqualsKeyword)) {
-            return false
-        } else {
-            return undefined
+            return true;
+        }
+        else if (parseOptional(SyntaxKind.EqualsKeyword)) {
+            return false;
+        }
+        else {
+            return undefined;
         }
     }
 
     function parseConstraintDistributivity(): boolean {
         if (parseOptional(SyntaxKind.OneofKeyword)) {
-            return true
-        } else {
-            return false
+            return true;
+        }
+        else {
+            return false;
         }
     }
 
     function parseConstraintDefinition(): ConstraintDefinition | undefined {
-        const transitive = parseConstraintTransitivity()
+        const transitive = parseConstraintTransitivity();
 
         if (transitive === undefined) {
-            return undefined
+            return undefined;
         }
 
-        const distributive = parseConstraintDistributivity()
+        const distributive = parseConstraintDistributivity();
 
-        let type: TypeNode | undefined
-        let expression: Expression | undefined
+        let type: TypeNode | undefined;
+        let expression: Expression | undefined;
 
         // It's not uncommon for people to write improper constraints to a generic.  If the
         // user writes a constraint that is an expression and not an actual type, then parse
         // it out as an expression (so we can recover well), but report that a type is needed
         // instead.
         if (isStartOfType() || !isStartOfExpression()) {
-            type = parseType()
+            type = parseType();
         }
         else {
             // It was not a type, and it looked like an expression.  Parse out an expression
@@ -3903,10 +3906,10 @@ namespace Parser {
             expression = parseUnaryExpressionOrHigher();
         }
 
-        const node = factory.createConstraintDefinition(type, transitive, distributive)
-        node.expression = expression
+        const node = factory.createConstraintDefinition(type, transitive, distributive);
+        node.expression = expression;
 
-        return node
+        return node;
     }
 
     function parseTypeParameter(): TypeParameterDeclaration {
@@ -3914,7 +3917,7 @@ namespace Parser {
         const modifiers = parseModifiers(/*allowDecorators*/ false, /*permitConstAsModifier*/ true);
         const name = parseIdentifier();
 
-        const constraint = parseConstraintDefinition()
+        const constraint = parseConstraintDefinition();
 
         const defaultType = parseOptional(SyntaxKind.EqualsToken) ? parseType() : undefined;
         const node = factory.createTypeParameterDeclaration(modifiers, name, constraint, defaultType);
@@ -4340,7 +4343,7 @@ namespace Parser {
         const name = parseIdentifierName();
         parseExpected(SyntaxKind.InKeyword);
         const type = parseType();
-        const constraint = factory.createConstraintDefinition(type, false, true);
+        const constraint = factory.createConstraintDefinition(type, /*transitive*/ false, /*distributive*/ true);
         return finishNode(factory.createTypeParameterDeclaration(/*modifiers*/ undefined, name, constraint, /*defaultType*/ undefined), pos);
     }
 
@@ -9574,7 +9577,7 @@ namespace Parser {
                 // TODO: Determine whether we should enforce this in the checker.
                 // TODO: Consider moving the `constraint` to the first type parameter as we could then remove `getEffectiveConstraintOfTypeParameter`.
                 // TODO: Consider only parsing a single type parameter if there is a constraint.
-                const constraint = token() === SyntaxKind.OpenBraceToken ? parseJSDocTypeExpression() : undefined;
+                const constraint = token() === SyntaxKind.OpenBraceToken ? factory.createConstraintDefinition(parseJSDocTypeExpression(), /*transitive*/ true, /*distributive*/ false) : undefined;
                 const typeParameters = parseTemplateTagTypeParameters();
                 return finishNode(factory.createJSDocTemplateTag(tagName, constraint, typeParameters, parseTrailingTagComments(start, getNodePos(), indent, indentText)), start);
             }
