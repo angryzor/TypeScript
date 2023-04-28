@@ -189,6 +189,7 @@ export const enum SyntaxKind {
     // Contextual keywords
     AbstractKeyword,
     AccessorKeyword,
+    AnyofKeyword,
     AsKeyword,
     AssertsKeyword,
     AssertKeyword,
@@ -592,6 +593,7 @@ export type KeywordSyntaxKind =
     | SyntaxKind.AbstractKeyword
     | SyntaxKind.AccessorKeyword
     | SyntaxKind.AnyKeyword
+    | SyntaxKind.AnyofKeyword
     | SyntaxKind.AsKeyword
     | SyntaxKind.AssertsKeyword
     | SyntaxKind.AssertKeyword
@@ -679,6 +681,7 @@ export type KeywordSyntaxKind =
 export type ModifierSyntaxKind =
     | SyntaxKind.AbstractKeyword
     | SyntaxKind.AccessorKeyword
+    | SyntaxKind.AnyofKeyword
     | SyntaxKind.AsyncKeyword
     | SyntaxKind.ConstKeyword
     | SyntaxKind.DeclareKeyword
@@ -710,6 +713,11 @@ export type KeywordTypeSyntaxKind =
     | SyntaxKind.UndefinedKeyword
     | SyntaxKind.UnknownKeyword
     | SyntaxKind.VoidKeyword
+    ;
+
+export type ConstraintNodeSyntaxKind =
+    | SyntaxKind.TypeParameterConstraint
+    | SyntaxKind.JSDocConstraint
     ;
 
 /** @internal */
@@ -881,12 +889,19 @@ export const enum ModifierFlags {
     In =                 1 << 15, // Contravariance modifier
     Out =                1 << 16, // Covariance modifier
     Decorator =          1 << 17, // Contains a decorator.
+    Extends =            1 << 18, // Constraints
+    Equals =             1 << 19, // Constraints
+    Anyof =              1 << 20, // Constraints
+    Oneof =              1 << 21, // Constraints
     HasComputedFlags =   1 << 29, // Modifier flags have been computed
 
     AccessibilityModifier = Public | Private | Protected,
     // Accessibility modifiers and 'readonly' can be attached to a parameter in a constructor to make it a property.
     ParameterPropertyModifier = AccessibilityModifier | Readonly | Override,
     NonPublicAccessibilityModifier = Private | Protected,
+
+    ConstraintTransitivityModifier = Extends | Equals,
+    ConstraintDistributivityModifier = Anyof | Oneof,
 
     TypeScriptModifier = Ambient | Public | Private | Protected | Readonly | Abstract | Const | Override | In | Out,
     ExportDefault = Export | Default,
@@ -1374,6 +1389,7 @@ export type HasModifiers =
     | ImportDeclaration
     | ExportAssignment
     | ExportDeclaration
+    | TypeParameterConstraint
     ;
 
 // NOTE: Changing the following list requires changes to:
@@ -1623,6 +1639,7 @@ export interface ModifierToken<TKind extends ModifierSyntaxKind> extends Keyword
 
 export type AbstractKeyword = ModifierToken<SyntaxKind.AbstractKeyword>;
 export type AccessorKeyword = ModifierToken<SyntaxKind.AccessorKeyword>;
+export type AnyofKeyword = ModifierToken<SyntaxKind.AnyofKeyword>;
 export type AsyncKeyword = ModifierToken<SyntaxKind.AsyncKeyword>;
 export type ConstKeyword = ModifierToken<SyntaxKind.ConstKeyword>;
 export type DeclareKeyword = ModifierToken<SyntaxKind.DeclareKeyword>;
@@ -1643,6 +1660,7 @@ export type StaticKeyword = ModifierToken<SyntaxKind.StaticKeyword>;
 export type Modifier =
     | AbstractKeyword
     | AccessorKeyword
+    | AnyofKeyword
     | AsyncKeyword
     | ConstKeyword
     | DeclareKeyword
@@ -1820,6 +1838,7 @@ export interface Decorator extends Node {
 }
 
 export interface ConstraintNode extends Node {
+    readonly kind: ConstraintNodeSyntaxKind;
     readonly type?: TypeNode;
 }
 
@@ -6028,6 +6047,19 @@ export interface PatternAmbientModule {
 }
 
 /** @internal */
+export const enum ConstraintFlags {
+    None = 0,
+    Transitive   = 1 << 0,
+    Distributive = 1 << 1,
+}
+
+/** @internal */
+export interface Constraint {
+    flags: ConstraintFlags;
+    type: Type;
+}
+
+/** @internal */
 export const enum NodeCheckFlags {
     None                                     = 0,
     TypeChecked                              = 1 << 0,   // Node has been type checked
@@ -6607,7 +6639,7 @@ export interface TypeParameter extends InstantiableType {
      *
      * @internal
      */
-    constraint?: Type;        // Constraint
+    constraint?: Constraint;        // Constraint
     /** @internal */
     default?: Type;
     /** @internal */

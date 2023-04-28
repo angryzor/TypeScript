@@ -947,6 +947,18 @@
         "category": "Error",
         "code": 1288
     },
+    "'{0}' modifier cannot appear on a type parameter constraint": {
+        "category": "Error",
+        "code": 1289
+    },
+    "Constraint transitivity modifier already seen.": {
+        "category": "Error",
+        "code": 1290
+    },
+    "Constraint distributivity modifier already seen.": {
+        "category": "Error",
+        "code": 1291
+    },
 
     "'with' statements are not allowed in an async function block.": {
         "category": "Error",

@@ -216,6 +216,7 @@ import {
     isSuperProperty,
     isThisIdentifier,
     isTypeAliasDeclaration,
+    isTypeParameterConstraint,
     isTypeParameterDeclaration,
     isVariableDeclaration,
     isVariableStatement,
@@ -7008,6 +7009,7 @@ export function createNodeFactory(flags: NodeFactoryFlags, baseFactory: BaseNode
             modifierArray = modifiers;
         }
         return isTypeParameterDeclaration(node) ? updateTypeParameterDeclaration(node, modifierArray, node.name, node.constraint, node.default) :
+            isTypeParameterConstraint(node) ? updateTypeParameterConstraint(node, modifierArray, node.type) :
             isParameter(node) ? updateParameterDeclaration(node, modifierArray, node.dotDotDotToken, node.name, node.questionToken, node.type, node.initializer) :
             isConstructorTypeNode(node) ? updateConstructorTypeNode1(node, modifierArray, node.typeParameters, node.parameters, node.type) :
             isPropertySignature(node) ? updatePropertySignature(node, modifierArray, node.name, node.questionToken, node.type) :

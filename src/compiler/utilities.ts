@@ -6882,6 +6882,10 @@ export function modifierToFlag(token: SyntaxKind): ModifierFlags {
         case SyntaxKind.InKeyword: return ModifierFlags.In;
         case SyntaxKind.OutKeyword: return ModifierFlags.Out;
         case SyntaxKind.Decorator: return ModifierFlags.Decorator;
+        case SyntaxKind.ExtendsKeyword: return ModifierFlags.Extends;
+        case SyntaxKind.EqualsKeyword: return ModifierFlags.Equals;
+        case SyntaxKind.AnyofKeyword: return ModifierFlags.Anyof;
+        case SyntaxKind.OneofKeyword: return ModifierFlags.Oneof;
     }
     return ModifierFlags.None;
 }

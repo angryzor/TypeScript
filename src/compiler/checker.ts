@@ -88,6 +88,9 @@ import {
     ConditionalRoot,
     ConditionalType,
     ConditionalTypeNode,
+    Constraint,
+    ConstraintFlags,
+    ConstraintNode,
     ConstructorDeclaration,
     ConstructorTypeNode,
     ConstructSignatureDeclaration,
@@ -748,6 +751,7 @@ import {
     JSDocAugmentsTag,
     JSDocCallbackTag,
     JSDocComment,
+    JSDocConstraint,
     JSDocEnumTag,
     JSDocFunctionType,
     JSDocImplementsTag,
@@ -1035,6 +1039,7 @@ import {
     TypeOnlyCompatibleAliasDeclaration,
     TypeOperatorNode,
     TypeParameter,
+    TypeParameterConstraint,
     TypeParameterDeclaration,
     TypePredicate,
     TypePredicateKind,
@@ -2001,12 +2006,12 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
 
     var markerSuperType = createTypeParameter();
     var markerSubType = createTypeParameter();
-    markerSubType.constraint = markerSuperType;
+    markerSubType.constraint = createConstraint(markerSuperType);
     var markerOtherType = createTypeParameter();
 
     var markerSuperTypeForCheck = createTypeParameter();
     var markerSubTypeForCheck = createTypeParameter();
-    markerSubTypeForCheck.constraint = markerSuperTypeForCheck;
+    markerSubTypeForCheck.constraint = createConstraint(markerSuperTypeForCheck);
 
     var noTypePredicate = createTypePredicate(TypePredicateKind.Identifier, "<<unresolved>>", 0, anyType);
 
@@ -5603,6 +5608,10 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         }
     }
 
+    function createConstraint(type: Type, flags: ConstraintFlags = ConstraintFlags.Transitive): Constraint {
+        return { type, flags };
+    }
+
     function createType(flags: TypeFlags): Type {
         const result = new Type(checker, flags);
         typeCount++;
@@ -6330,6 +6339,16 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             return context.truncating = context.approximateLength > ((context.flags & NodeBuilderFlags.NoTruncation) ? noTruncationMaximumTruncationLength : defaultMaximumTruncationLength);
         }
 
+        function constraintToConstraintNodeHelper(constraint: Constraint, context: NodeBuilderContext): ConstraintNode {
+            return factory.createTypeParameterConstraint(
+                [
+                    factory.createModifier(constraint.flags & ConstraintFlags.Transitive ? SyntaxKind.ExtendsKeyword : SyntaxKind.EqualsKeyword),
+                    factory.createModifier(constraint.flags & ConstraintFlags.Distributive ? SyntaxKind.OneofKeyword : SyntaxKind.AnyofKeyword),
+                ],
+                typeToTypeNodeHelper(constraint.type, context),
+            );
+        }
+
         function typeToTypeNodeHelper(type: Type, context: NodeBuilderContext): TypeNode {
             const savedFlags = context.flags;
             const typeNode = typeToTypeNodeWorker(type, context);
@@ -6496,7 +6515,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             if (type.flags & TypeFlags.TypeParameter || objectFlags & ObjectFlags.ClassOrInterface) {
                 if (type.flags & TypeFlags.TypeParameter && contains(context.inferTypeParameters, type)) {
                     context.approximateLength += (symbolName(type.symbol).length + 6);
-                    let constraintNode: TypeNode | undefined;
+                    let constraintNode: ConstraintNode | undefined;
                     const constraint = getConstraintOfTypeParameter(type as TypeParameter);
                     if (constraint) {
                         // If the infer type has a constraint that is not the same as the constraint
@@ -6504,7 +6523,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                         // using `infer T extends ?`. We omit inferred constraints from type references
                         // as they may be elided.
                         const inferredConstraint = getInferredTypeParameterConstraint(type as TypeParameter, /*omitTypeReferences*/ true);
-                        if (!(inferredConstraint && isTypeIdenticalTo(constraint, inferredConstraint))) {
+                        if (!(inferredConstraint && isConstraintIdenticalTo(constraint, inferredConstraint))) {
                             context.approximateLength += 9;
                             constraintNode = constraint && typeToTypeNodeHelper(constraint, context);
                         }
@@ -6661,7 +6680,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 Debug.assert(!!(type.flags & TypeFlags.Object));
                 const readonlyToken = type.declaration.readonlyToken ? factory.createToken(type.declaration.readonlyToken.kind) as ReadonlyKeyword | PlusToken | MinusToken : undefined;
                 const questionToken = type.declaration.questionToken ? factory.createToken(type.declaration.questionToken.kind) as QuestionToken | PlusToken | MinusToken : undefined;
-                let appropriateConstraintTypeNode: TypeNode;
+                let appropriateConstraintNode: ConstraintNode;
                 let newTypeVariable: TypeReferenceNode | undefined;
                 if (isMappedTypeWithKeyofConstraintDeclaration(type)) {
                     // We have a { [P in keyof T]: X }
@@ -6671,12 +6690,12 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                         const name = typeParameterToName(newParam, context);
                         newTypeVariable = factory.createTypeReferenceNode(name);
                     }
-                    appropriateConstraintTypeNode = factory.createTypeOperatorNode(SyntaxKind.KeyOfKeyword, newTypeVariable || typeToTypeNodeHelper(getModifiersTypeFromMappedType(type), context));
+                    appropriateConstraintNode = factory.createTypeOperatorNode(SyntaxKind.KeyOfKeyword, newTypeVariable || typeToTypeNodeHelper(getModifiersTypeFromMappedType(type), context));
                 }
                 else {
-                    appropriateConstraintTypeNode = typeToTypeNodeHelper(getConstraintTypeFromMappedType(type), context);
+                    appropriateConstraintNode = typeToTypeNodeHelper(getConstraintTypeFromMappedType(type), context);
                 }
-                const typeParameterNode = typeParameterToDeclarationWithConstraint(getTypeParameterFromMappedType(type), context, appropriateConstraintTypeNode);
+                const typeParameterNode = typeParameterToDeclarationWithConstraint(getTypeParameterFromMappedType(type), context, appropriateConstraintNode);
                 const nameTypeNode = type.declaration.nameType ? typeToTypeNodeHelper(getNameTypeFromMappedType(type)!, context) : undefined;
                 const templateTypeNode = typeToTypeNodeHelper(removeMissingType(getTemplateTypeFromMappedType(type), !!(getMappedTypeModifiers(type) & MappedTypeModifiers.IncludeOptional)), context);
                 const mappedTypeNode = factory.createMappedTypeNode(readonlyToken, typeParameterNode, nameTypeNode, questionToken, templateTypeNode, /*members*/ undefined);
@@ -7486,7 +7505,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             }
         }
 
-        function typeParameterToDeclarationWithConstraint(type: TypeParameter, context: NodeBuilderContext, constraintNode: TypeNode | undefined): TypeParameterDeclaration {
+        function typeParameterToDeclarationWithConstraint(type: TypeParameter, context: NodeBuilderContext, constraintNode: ConstraintNode | undefined): TypeParameterDeclaration {
             const savedContextFlags = context.flags;
             context.flags &= ~NodeBuilderFlags.WriteTypeParametersInQualifiedName; // Avoids potential infinite loop when building for a claimspace with a generic
             const modifiers = factory.createModifiersFromModifierFlags(getTypeParameterModifiers(type));
@@ -7498,7 +7517,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         }
 
         function typeParameterToDeclaration(type: TypeParameter, context: NodeBuilderContext, constraint = getConstraintOfTypeParameter(type)): TypeParameterDeclaration {
-            const constraintNode = constraint && typeToTypeNodeHelper(constraint, context);
+            const constraintNode = constraint && constraintToConstraintNodeHelper(constraint, context);
             return typeParameterToDeclarationWithConstraint(type, context, constraintNode);
         }
 
@@ -12192,7 +12211,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
     /** A type parameter is thisless if its constraint is thisless, or if it has no constraint. */
     function isThislessTypeParameter(node: TypeParameterDeclaration) {
         const constraint = getEffectiveConstraintOfTypeParameter(node);
-        return !constraint || isThislessType(constraint);
+        return !constraint?.type || isThislessType(constraint.type);
     }
 
     /**
@@ -13569,7 +13588,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             getBaseConstraintOfType(type);
     }
 
-    function getConstraintOfTypeParameter(typeParameter: TypeParameter): Type | undefined {
+    function getConstraintOfTypeParameter(typeParameter: TypeParameter): Constraint | undefined {
         return hasNonCircularBaseConstraint(typeParameter) ? getConstraintFromTypeParameter(typeParameter) : undefined;
     }
 
@@ -15012,7 +15031,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             !!(type.flags & TypeFlags.Intersection) && !isGenericType(type) && some((type as IntersectionType).types, isValidIndexKeyType);
     }
 
-    function getConstraintDeclaration(type: TypeParameter): TypeNode | undefined {
+    function getConstraintDeclaration(type: TypeParameter): ConstraintNode | undefined {
         return mapDefined(filter(type.symbol && type.symbol.declarations, isTypeParameterDeclaration), getEffectiveConstraintOfTypeParameter)[0];
     }
 
@@ -15088,7 +15107,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
     }
 
     /** This is a worker function. Use getConstraintOfTypeParameter which guards against circular constraints. */
-    function getConstraintFromTypeParameter(typeParameter: TypeParameter): Type | undefined {
+    function getConstraintFromTypeParameter(typeParameter: TypeParameter): Constraint | undefined {
         if (!typeParameter.constraint) {
             if (typeParameter.target) {
                 const targetConstraint = getConstraintOfTypeParameter(typeParameter.target);
@@ -18436,6 +18455,30 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 addOptionality(getTypeFromTypeNode(node.type), /*isProperty*/ true, !!node.questionToken));
     }
 
+    function getConstraintFromConstraintNode(node: ConstraintNode): Constraint | undefined {
+        if (node.type === undefined) {
+            return undefined;
+        }
+
+        switch (node.kind) {
+            case SyntaxKind.TypeParameterConstraint:
+                let flags = ConstraintFlags.None;
+
+                if (!(node.modifierFlagsCache & ModifierFlags.Equals)) {
+                    flags |= ConstraintFlags.Transitive;
+                }
+
+                if (node.modifierFlagsCache & ModifierFlags.Oneof) {
+                    flags |= ConstraintFlags.Distributive;
+                }
+
+                return createConstraint(getTypeFromTypeNode(node.type), flags);
+
+            case SyntaxKind.JSDocConstraint:
+                return createConstraint(getTypeFromTypeNode(node.type));
+        }
+    }
+
     function getTypeFromTypeNode(node: TypeNode): Type {
         return getConditionalFlowTypeOfType(getTypeFromTypeNodeWorker(node), node);
     }
@@ -19220,6 +19263,12 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             return getIntersectionType(map((type as IntersectionType).types, getTypeWithoutSignatures));
         }
         return type;
+    }
+
+    function isConstraintIdenticalTo(source: Constraint, target: Constraint): boolean {
+        return source.transitive === target.transitive
+            && source.distributive === target.distributive
+            && isTypeIdenticalTo(source.type, target.type);
     }
 
     // TYPE CHECKING
@@ -20758,7 +20807,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             reportRelationError(headMessage, source, target);
             if (source.flags & TypeFlags.TypeParameter && source.symbol?.declarations?.[0] && !getConstraintOfType(source as TypeVariable)) {
                 const syntheticParam = cloneTypeParameter(source as TypeParameter);
-                syntheticParam.constraint = instantiateType(target, makeUnaryTypeMapper(source, syntheticParam));
+                syntheticParam.constraint = createConstraint(instantiateType(target, makeUnaryTypeMapper(source, syntheticParam)));
                 if (hasNonCircularBaseConstraint(syntheticParam)) {
                     const targetConstraintString = typeToString(target, source.symbol.declarations[0]);
                     associateRelatedInfo(createDiagnosticForNode(source.symbol.declarations[0], Diagnostics.This_type_parameter_might_need_an_extends_0_constraint, targetConstraintString));
@@ -37918,12 +37967,19 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
 
     // DECLARATION AND STATEMENT TYPE CHECKING
 
-    function checkTypeParameter(node: TypeParameterDeclaration) {
-        // Grammar Checking
+    function checkTypeParameterConstraint(node: TypeParameterConstraint) {
         checkGrammarModifiers(node);
+
         if (node.expression) {
             grammarErrorOnFirstToken(node.expression, Diagnostics.Type_expected);
         }
+
+        checkSourceElement(node.type);
+    }
+
+    function checkTypeParameter(node: TypeParameterDeclaration) {
+        // Grammar Checking
+        checkGrammarModifiers(node);
 
         checkSourceElement(node.constraint);
         checkSourceElement(node.default);
@@ -40089,6 +40145,10 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         }
         checkSourceElement(node.typeExpression);
         checkTypeParameters(getEffectiveTypeParameterDeclarations(node));
+    }
+
+    function checkJSDocConstraint(node: JSDocConstraint): void {
+        checkSourceElement(node.type);
     }
 
     function checkJSDocTemplateTag(node: JSDocTemplateTag): void {
@@ -42714,11 +42774,11 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 // If the type parameter node does not have an identical constraint as the resolved
                 // type parameter at this position, we report an error.
                 const constraint = getEffectiveConstraintOfTypeParameter(source);
-                const sourceConstraint = constraint && getTypeFromTypeNode(constraint);
+                const sourceConstraint = constraint && getConstraintFromConstraintNode(constraint);
                 const targetConstraint = getConstraintOfTypeParameter(target);
                 // relax check if later interface augmentation has no constraint, it's more broad and is OK to merge with
                 // a more constrained interface (this could be generalized to a full hierarchy check, but that's maybe overkill)
-                if (sourceConstraint && targetConstraint && !isTypeIdenticalTo(sourceConstraint, targetConstraint)) {
+                if (sourceConstraint && targetConstraint && !isConstraintIdenticalTo(sourceConstraint, targetConstraint)) {
                     return false;
                 }
 
@@ -44652,6 +44712,8 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         switch (kind) {
             case SyntaxKind.TypeParameter:
                 return checkTypeParameter(node as TypeParameterDeclaration);
+            case SyntaxKind.TypeParameterConstraint:
+                return checkTypeParameterConstraint(node as TypeParameterConstraint);
             case SyntaxKind.Parameter:
                 return checkParameter(node as ParameterDeclaration);
             case SyntaxKind.PropertyDeclaration:
@@ -44715,6 +44777,8 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             case SyntaxKind.JSDocCallbackTag:
             case SyntaxKind.JSDocEnumTag:
                 return checkJSDocTypeAliasTag(node as JSDocTypedefTag);
+            case SyntaxKind.JSDocConstraint:
+                return checkJSDocConstraint(node as JSDocConstraint);
             case SyntaxKind.JSDocTemplateTag:
                 return checkJSDocTemplateTag(node as JSDocTemplateTag);
             case SyntaxKind.JSDocTypeTag:
@@ -47124,6 +47188,12 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                         return grammarErrorOnNode(modifier, Diagnostics._0_modifier_cannot_appear_on_a_type_parameter, tokenToString(modifier.kind));
                     }
                 }
+                if (modifier.kind !== SyntaxKind.EqualsKeyword && modifier.kind !== SyntaxKind.ExtendsKeyword
+                    && modifier.kind !== SyntaxKind.AnyofKeyword && modifier.kind !== SyntaxKind.OneofKeyword) {
+                    if (node.kind === SyntaxKind.TypeParameterConstraint) {
+                        return grammarErrorOnNode(modifier, Diagnostics._0_modifier_cannot_appear_on_a_type_parameter_constraint, tokenToString(modifier.kind));
+                    }
+                }
                 switch (modifier.kind) {
                     case SyntaxKind.ConstKeyword:
                         if (node.kind !== SyntaxKind.EnumDeclaration && node.kind !== SyntaxKind.TypeParameter) {
@@ -47404,6 +47474,20 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                         }
                         flags |= inOutFlag;
                         break;
+                    case SyntaxKind.EqualsKeyword:
+                    case SyntaxKind.ExtendsKeyword:
+                        if (flags & ModifierFlags.ConstraintTransitivityModifier) {
+                            return grammarErrorOnNode(modifier, Diagnostics.Constraint_transitivity_modifier_already_seen);
+                        }
+                        flags |= modifierToFlag(modifier.kind);
+                        break;
+                    case SyntaxKind.AnyofKeyword:
+                    case SyntaxKind.OneofKeyword:
+                        if (flags & ModifierFlags.ConstraintDistributivityModifier) {
+                            return grammarErrorOnNode(modifier, Diagnostics.Constraint_distributivity_modifier_already_seen);
+                        }
+                        flags |= modifierToFlag(modifier.kind);
+                        break;
                 }
             }
         }
@@ -47470,6 +47554,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             case SyntaxKind.ArrowFunction:
             case SyntaxKind.Parameter:
             case SyntaxKind.TypeParameter:
+            case SyntaxKind.TypeParameterConstraint:
                 return undefined;
             case SyntaxKind.ClassStaticBlockDeclaration:
             case SyntaxKind.PropertyAssignment:
