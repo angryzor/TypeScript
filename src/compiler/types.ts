@@ -6553,7 +6553,7 @@ export interface InstantiationExpressionType extends AnonymousType {
 export interface MappedType extends AnonymousType {
     declaration: MappedTypeNode;
     typeParameter?: TypeParameter;
-    constraintType?: Type;
+    constraintType?: Type;         // Constraints of MappedTypes are currently always assumed to be `equals oneof`, so no need to store the full constraint.
     nameType?: Type;
     templateType?: Type;
     modifiersType?: Type;

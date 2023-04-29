@@ -6525,7 +6525,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                         const inferredConstraint = getInferredTypeParameterConstraint(type as TypeParameter, /*omitTypeReferences*/ true);
                         if (!(inferredConstraint && isConstraintIdenticalTo(constraint, inferredConstraint))) {
                             context.approximateLength += 9;
-                            constraintNode = constraint && typeToTypeNodeHelper(constraint, context);
+                            constraintNode = constraint && constraintToConstraintNodeHelper(constraint, context);
                         }
                     }
                     return factory.createInferTypeNode(typeParameterToDeclarationWithConstraint(type as TypeParameter, context, constraintNode));
@@ -11788,8 +11788,8 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 if (baseConstructorType.flags & TypeFlags.TypeParameter) {
                     const constraint = getConstraintFromTypeParameter(baseConstructorType);
                     let ctorReturn: Type = unknownType;
-                    if (constraint) {
-                        const ctorSig = getSignaturesOfType(constraint, SignatureKind.Construct);
+                    if (constraint?.type) {
+                        const ctorSig = getSignaturesOfType(constraint.type, SignatureKind.Construct);
                         if (ctorSig[0]) {
                             ctorReturn = getReturnTypeOfSignature(ctorSig[0]);
                         }
@@ -12042,7 +12042,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 (type as GenericType).resolvedTypeArguments = type.typeParameters;
                 type.thisType = createTypeParameter(symbol);
                 type.thisType.isThisType = true;
-                type.thisType.constraint = type;
+                type.thisType.constraint = createConstraint(type);
             }
         }
         return links.declaredType as InterfaceType;
@@ -12866,7 +12866,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             const target = targetParams[i];
             if (source === target) continue;
             // We instantiate the target type parameter constraints into the source types so we can recognize `<T, U extends T>` as the same as `<A, B extends A>`
-            if (!isTypeIdenticalTo(getConstraintFromTypeParameter(source) || unknownType, instantiateType(getConstraintFromTypeParameter(target) || unknownType, mapper))) return false;
+            if (!isConstraintIdenticalTo(getConstraintFromTypeParameter(source) || createConstraint(unknownType), instantiateType(getConstraintFromTypeParameter(target) || createConstraint(unknownType), mapper))) return false;
             // We don't compare defaults - we just use the type parameter defaults from the first signature that seems to match.
             // It might make sense to combine these defaults in the future, but doing so intelligently requires knowing
             // if the parameter is used covariantly or contravariantly (so we intersect if it's used like a parameter or union if used like a return type)
@@ -13365,7 +13365,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
 
     function getConstraintTypeFromMappedType(type: MappedType) {
         return type.constraintType ||
-            (type.constraintType = getConstraintOfTypeParameter(getTypeParameterFromMappedType(type)) || errorType);
+            (type.constraintType = getConstraintOfTypeParameter(getTypeParameterFromMappedType(type))?.type || errorType);
     }
 
     function getNameTypeFromMappedType(type: MappedType) {
@@ -13382,7 +13382,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
     }
 
     function getConstraintDeclarationForMappedType(type: MappedType) {
-        return getEffectiveConstraintOfTypeParameter(type.declaration.typeParameter);
+        return getEffectiveConstraintOfTypeParameter(type.declaration.typeParameter)?.type;
     }
 
     function isMappedTypeWithKeyofConstraintDeclaration(type: MappedType) {
@@ -17786,7 +17786,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
 
     function maybeCloneTypeParameter(p: TypeParameter) {
         const constraint = getConstraintOfTypeParameter(p);
-        return constraint && (isGenericObjectType(constraint) || isGenericIndexType(constraint)) ? cloneTypeParameter(p) : p;
+        return constraint?.type && (isGenericObjectType(constraint.type) || isGenericIndexType(constraint.type)) ? cloneTypeParameter(p) : p;
     }
 
     function isSimpleTupleType(node: TypeNode) {
@@ -19266,9 +19266,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
     }
 
     function isConstraintIdenticalTo(source: Constraint, target: Constraint): boolean {
-        return source.transitive === target.transitive
-            && source.distributive === target.distributive
-            && isTypeIdenticalTo(source.type, target.type);
+        return source.flags === target.flags && isTypeIdenticalTo(source.type, target.type);
     }
 
     // TYPE CHECKING
