@@ -189,7 +189,7 @@ export const enum SyntaxKind {
     // Contextual keywords
     AbstractKeyword,
     AccessorKeyword,
-    AnyofKeyword,
+    AllofKeyword,
     AsKeyword,
     AssertsKeyword,
     AssertKeyword,
@@ -593,7 +593,7 @@ export type KeywordSyntaxKind =
     | SyntaxKind.AbstractKeyword
     | SyntaxKind.AccessorKeyword
     | SyntaxKind.AnyKeyword
-    | SyntaxKind.AnyofKeyword
+    | SyntaxKind.AllofKeyword
     | SyntaxKind.AsKeyword
     | SyntaxKind.AssertsKeyword
     | SyntaxKind.AssertKeyword
@@ -681,7 +681,7 @@ export type KeywordSyntaxKind =
 export type ModifierSyntaxKind =
     | SyntaxKind.AbstractKeyword
     | SyntaxKind.AccessorKeyword
-    | SyntaxKind.AnyofKeyword
+    | SyntaxKind.AllofKeyword
     | SyntaxKind.AsyncKeyword
     | SyntaxKind.ConstKeyword
     | SyntaxKind.DeclareKeyword
@@ -891,7 +891,7 @@ export const enum ModifierFlags {
     Decorator =          1 << 17, // Contains a decorator.
     Extends =            1 << 18, // Constraints
     Equals =             1 << 19, // Constraints
-    Anyof =              1 << 20, // Constraints
+    Allof =              1 << 20, // Constraints
     Oneof =              1 << 21, // Constraints
     HasComputedFlags =   1 << 29, // Modifier flags have been computed
 
@@ -901,7 +901,7 @@ export const enum ModifierFlags {
     NonPublicAccessibilityModifier = Private | Protected,
 
     ConstraintTransitivityModifier = Extends | Equals,
-    ConstraintDistributivityModifier = Anyof | Oneof,
+    ConstraintDistributivityModifier = Allof | Oneof,
 
     TypeScriptModifier = Ambient | Public | Private | Protected | Readonly | Abstract | Const | Override | In | Out,
     ExportDefault = Export | Default,
@@ -1639,7 +1639,7 @@ export interface ModifierToken<TKind extends ModifierSyntaxKind> extends Keyword
 
 export type AbstractKeyword = ModifierToken<SyntaxKind.AbstractKeyword>;
 export type AccessorKeyword = ModifierToken<SyntaxKind.AccessorKeyword>;
-export type AnyofKeyword = ModifierToken<SyntaxKind.AnyofKeyword>;
+export type AllofKeyword = ModifierToken<SyntaxKind.AllofKeyword>;
 export type AsyncKeyword = ModifierToken<SyntaxKind.AsyncKeyword>;
 export type ConstKeyword = ModifierToken<SyntaxKind.ConstKeyword>;
 export type DeclareKeyword = ModifierToken<SyntaxKind.DeclareKeyword>;
@@ -1660,7 +1660,7 @@ export type StaticKeyword = ModifierToken<SyntaxKind.StaticKeyword>;
 export type Modifier =
     | AbstractKeyword
     | AccessorKeyword
-    | AnyofKeyword
+    | AllofKeyword
     | AsyncKeyword
     | ConstKeyword
     | DeclareKeyword

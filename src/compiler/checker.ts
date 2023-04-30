@@ -1963,6 +1963,8 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
     var templateConstraintType = getUnionType([stringType, numberType, booleanType, bigintType, nullType, undefinedType]) as UnionType;
     var numericStringType = getTemplateLiteralType(["", ""], [numberType]);  // The `${number}` type
 
+    var nullConstraint = createConstraint(unknownType);
+
     var restrictiveMapper: TypeMapper = makeFunctionTypeMapper(t => t.flags & TypeFlags.TypeParameter ? getRestrictiveTypeParameter(t as TypeParameter) : t, () => "(restrictive mapper)");
     var permissiveMapper: TypeMapper = makeFunctionTypeMapper(t => t.flags & TypeFlags.TypeParameter ? wildcardType : t, () => "(permissive mapper)");
     var uniqueLiteralType = createIntrinsicType(TypeFlags.Never, "never"); // `uniqueLiteralType` is a special `never` flagged by union reduction to behave as a literal
@@ -12866,7 +12868,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             const target = targetParams[i];
             if (source === target) continue;
             // We instantiate the target type parameter constraints into the source types so we can recognize `<T, U extends T>` as the same as `<A, B extends A>`
-            if (!isConstraintIdenticalTo(getConstraintFromTypeParameter(source) || createConstraint(unknownType), instantiateType(getConstraintFromTypeParameter(target) || createConstraint(unknownType), mapper))) return false;
+            if (!isConstraintIdenticalTo(getConstraintFromTypeParameter(source) || nullConstraint, instantiateConstraint(getConstraintFromTypeParameter(target) || nullConstraint, mapper))) return false;
             // We don't compare defaults - we just use the type parameter defaults from the first signature that seems to match.
             // It might make sense to combine these defaults in the future, but doing so intelligently requires knowing
             // if the parameter is used covariantly or contravariantly (so we intersect if it's used like a parameter or union if used like a return type)
@@ -16110,7 +16112,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         type.resolvedTypeArguments = type.typeParameters;
         type.thisType = createTypeParameter();
         type.thisType.isThisType = true;
-        type.thisType.constraint = type;
+        type.thisType.constraint = createConstraint(type);
         type.declaredProperties = properties;
         type.declaredCallSignatures = emptyArray;
         type.declaredConstructSignatures = emptyArray;
@@ -19047,6 +19049,12 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         return type;
     }
 
+    function instantiateConstraint(constraint: Constraint, mapper: TypeMapper | undefined): Constraint;
+    function instantiateConstraint(constraint: Constraint | undefined, mapper: TypeMapper | undefined): Constraint | undefined;
+    function instantiateConstraint(constraint: Constraint | undefined, mapper: TypeMapper | undefined): Constraint | undefined {
+        return constraint && mapper ? instantiateType(constraint.type, mapper) : constraint;
+    }
+
     function instantiateType(type: Type, mapper: TypeMapper | undefined): Type;
     function instantiateType(type: Type | undefined, mapper: TypeMapper | undefined): Type | undefined;
     function instantiateType(type: Type | undefined, mapper: TypeMapper | undefined): Type | undefined {
@@ -19267,6 +19275,10 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
 
     function isConstraintIdenticalTo(source: Constraint, target: Constraint): boolean {
         return source.flags === target.flags && isTypeIdenticalTo(source.type, target.type);
+    }
+
+    function compareConstraintsIdentical(source: Constraint, target: Constraint, compareTypes: (s: Type, t: Type) => Ternary): Ternary {
+        return source.flags !== target.flags ? Ternary.False : compareTypes(source.type || unknownType, target.type || unknownType);
     }
 
     // TYPE CHECKING
@@ -23133,7 +23145,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             for (let i = 0; i < target.typeParameters.length; i++) {
                 const s = source.typeParameters![i];
                 const t = target.typeParameters[i];
-                if (!(s === t || compareTypes(instantiateType(getConstraintFromTypeParameter(s), mapper) || unknownType, getConstraintFromTypeParameter(t) || unknownType) &&
+                if (!(s === t || compareConstraintsIdentical(instantiateConstraint(getConstraintFromTypeParameter(s), mapper) || nullConstraint, getConstraintFromTypeParameter(t) || nullConstraint, compareTypes) &&
                     compareTypes(instantiateType(getDefaultFromTypeParameter(s), mapper) || unknownType, getDefaultFromTypeParameter(t) || unknownType))) {
                     return Ternary.False;
                 }
@@ -47187,7 +47199,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                     }
                 }
                 if (modifier.kind !== SyntaxKind.EqualsKeyword && modifier.kind !== SyntaxKind.ExtendsKeyword
-                    && modifier.kind !== SyntaxKind.AnyofKeyword && modifier.kind !== SyntaxKind.OneofKeyword) {
+                    && modifier.kind !== SyntaxKind.AllofKeyword && modifier.kind !== SyntaxKind.OneofKeyword) {
                     if (node.kind === SyntaxKind.TypeParameterConstraint) {
                         return grammarErrorOnNode(modifier, Diagnostics._0_modifier_cannot_appear_on_a_type_parameter_constraint, tokenToString(modifier.kind));
                     }
@@ -47479,7 +47491,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                         }
                         flags |= modifierToFlag(modifier.kind);
                         break;
-                    case SyntaxKind.AnyofKeyword:
+                    case SyntaxKind.AllofKeyword:
                     case SyntaxKind.OneofKeyword:
                         if (flags & ModifierFlags.ConstraintDistributivityModifier) {
                             return grammarErrorOnNode(modifier, Diagnostics.Constraint_distributivity_modifier_already_seen);
