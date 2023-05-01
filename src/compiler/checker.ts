@@ -6345,7 +6345,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             return factory.createTypeParameterConstraint(
                 [
                     factory.createModifier(constraint.flags & ConstraintFlags.Transitive ? SyntaxKind.ExtendsKeyword : SyntaxKind.EqualsKeyword),
-                    factory.createModifier(constraint.flags & ConstraintFlags.Distributive ? SyntaxKind.OneofKeyword : SyntaxKind.AnyofKeyword),
+                    factory.createModifier(constraint.flags & ConstraintFlags.Distributive ? SyntaxKind.OneofKeyword : SyntaxKind.AllofKeyword),
                 ],
                 typeToTypeNodeHelper(constraint.type, context),
             );
