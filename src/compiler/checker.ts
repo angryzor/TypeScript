@@ -15038,7 +15038,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
     }
 
     function getInferredTypeParameterConstraint(typeParameter: TypeParameter, omitTypeReferences?: boolean) {
-        let inferences: Type[] | undefined;
+        let inferences: Constraint[] | undefined;
         if (typeParameter.symbol?.declarations) {
             for (const declaration of typeParameter.symbol.declarations) {
                 if (declaration.parent.kind === SyntaxKind.InferType) {
@@ -15077,12 +15077,12 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                     else if (grandParent.kind === SyntaxKind.Parameter && (grandParent as ParameterDeclaration).dotDotDotToken ||
                         grandParent.kind === SyntaxKind.RestType ||
                         grandParent.kind === SyntaxKind.NamedTupleMember && (grandParent as NamedTupleMember).dotDotDotToken) {
-                        inferences = append(inferences, createArrayType(unknownType));
+                        inferences = append(inferences, createConstraint(createArrayType(unknownType)));
                     }
                     // When an 'infer T' declaration is immediately contained in a string template type, we infer a 'string'
                     // constraint.
                     else if (grandParent.kind === SyntaxKind.TemplateLiteralTypeSpan) {
-                        inferences = append(inferences, stringType);
+                        inferences = append(inferences, createConstraint(stringType));
                     }
                     // When an 'infer T' declaration is in the constraint position of a mapped type, we infer a 'keyof any'
                     // constraint.
@@ -15098,9 +15098,9 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                         ((grandParent.parent as ConditionalTypeNode).checkType as MappedTypeNode).type) {
                         const checkMappedType = (grandParent.parent as ConditionalTypeNode).checkType as MappedTypeNode;
                         const nodeType = getTypeFromTypeNode(checkMappedType.type!);
-                        inferences = append(inferences, instantiateType(nodeType,
+                        inferences = append(inferences, createConstraint(instantiateType(nodeType,
                             makeUnaryTypeMapper(getDeclaredTypeOfTypeParameter(getSymbolOfDeclaration(checkMappedType.typeParameter)), checkMappedType.typeParameter.constraint ? getTypeFromTypeNode(checkMappedType.typeParameter.constraint) : keyofConstraintType)
-                        ));
+                        )));
                     }
                 }
             }
@@ -15113,15 +15113,15 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         if (!typeParameter.constraint) {
             if (typeParameter.target) {
                 const targetConstraint = getConstraintOfTypeParameter(typeParameter.target);
-                typeParameter.constraint = targetConstraint ? instantiateType(targetConstraint, typeParameter.mapper) : noConstraintType;
+                typeParameter.constraint = targetConstraint ? instantiateConstraint(targetConstraint, typeParameter.mapper) : nullConstraint;
             }
             else {
                 const constraintDeclaration = getConstraintDeclaration(typeParameter);
                 if (!constraintDeclaration) {
-                    typeParameter.constraint = getInferredTypeParameterConstraint(typeParameter) || noConstraintType;
+                    typeParameter.constraint = getInferredTypeParameterConstraint(typeParameter) || nullConstraint;
                 }
                 else {
-                    let type = getTypeFromTypeNode(constraintDeclaration);
+                    let type = getConstraintFromConstraintNode(constraintDeclaration);
                     if (type.flags & TypeFlags.Any && !isErrorType(type)) { // Allow errorType to propegate to keep downstream errors suppressed
                         // use keyofConstraintType as the base constraint for mapped type key constraints (unknown isn;t assignable to that, but `any` was),
                         // use unknown otherwise
@@ -15131,7 +15131,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 }
             }
         }
-        return typeParameter.constraint === noConstraintType ? undefined : typeParameter.constraint;
+        return typeParameter.constraint === nullConstraint ? undefined : typeParameter.constraint;
     }
 
     function getParentSymbolOfTypeParameter(typeParameter: TypeParameter): Symbol | undefined {
@@ -19052,7 +19052,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
     function instantiateConstraint(constraint: Constraint, mapper: TypeMapper | undefined): Constraint;
     function instantiateConstraint(constraint: Constraint | undefined, mapper: TypeMapper | undefined): Constraint | undefined;
     function instantiateConstraint(constraint: Constraint | undefined, mapper: TypeMapper | undefined): Constraint | undefined {
-        return constraint && mapper ? instantiateType(constraint.type, mapper) : constraint;
+        return constraint && mapper ? createConstraint(instantiateType(constraint.type, mapper), constraint.flags) : constraint;
     }
 
     function instantiateType(type: Type, mapper: TypeMapper | undefined): Type;
@@ -25223,7 +25223,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                     const useCovariantType = inferredCovariantType && !(inferredCovariantType.flags & TypeFlags.Never) &&
                         some(inference.contraCandidates, t => isTypeSubtypeOf(inferredCovariantType, t)) &&
                         every(context.inferences, other =>
-                            other !== inference && getConstraintOfTypeParameter(other.typeParameter) !== inference.typeParameter ||
+                            other !== inference && getConstraintOfTypeParameter(other.typeParameter).type !== inference.typeParameter ||
                             every(other.candidates, t => isTypeSubtypeOf(t, inferredCovariantType)));
                     inferredType = useCovariantType ? inferredCovariantType : getContravariantInference(inference);
                 }
