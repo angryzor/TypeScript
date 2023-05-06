@@ -10,6 +10,7 @@ import {
     AllAccessorDeclarations,
     AmbientModuleDeclaration,
     and,
+    AllOfType,
     AnonymousType,
     AnyImportOrReExport,
     AnyImportSyntax,
@@ -869,6 +870,7 @@ import {
     ObjectLiteralElementLike,
     ObjectLiteralExpression,
     ObjectType,
+    OneOfType,
     OptionalChain,
     OptionalTypeNode,
     or,
@@ -6544,6 +6546,12 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                     }
                     return undefined!; // TODO: GH#18217
                 }
+            }
+            if (type.flags & TypeFlags.OneOf) {
+                return factory.createTypeOperatorNode(SyntaxKind.OneOfKeyword, typeToTypeNodeHelper((type as OneOfType).origin, context));
+            }
+            if (type.flags & TypeFlags.AllOf) {
+                return factory.createTypeOperatorNode(SyntaxKind.AllOfKeyword, typeToTypeNodeHelper((type as AllOfType).origin, context));
             }
             if (objectFlags & (ObjectFlags.Anonymous | ObjectFlags.Mapped)) {
                 Debug.assert(!!(type.flags & TypeFlags.Object));
@@ -16911,6 +16919,30 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         return links.resolvedType;
     }
 
+    function createAllOfType(origin: Type) {
+        const result = createType(TypeFlags.AllOf) as AllOfType;
+        result.origin = origin;
+        return result;
+    }
+
+    function getAllOfType(origin: Type) {
+        return origin.flags & TypeFlags.OneOf ? (origin as OneOfType).origin : origin
+    }
+
+    function createOneOfType(origin: Type) {
+        const result = createType(TypeFlags.OneOf) as OneOfType;
+        result.origin = origin;
+        return result;
+    }
+
+    function getOneOfType(origin: Type) {
+        // Squash nested oneofs. `mapType` will join the unions.
+        const mapped = mapType(origin, type => type.flags & TypeFlags.OneOf ? (type as OneOfType).origin : type);
+
+        // Don't repack unary types. Their type is definite.
+        return mapped.flags & TypeFlags.Union ? createOneOfType(mapped) : mapped;
+    }
+
     function createIndexType(type: InstantiableType | UnionOrIntersectionType, indexFlags: IndexFlags) {
         const result = createType(TypeFlags.Index) as IndexType;
         result.type = type;
@@ -17079,6 +17111,12 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             switch (node.operator) {
                 case SyntaxKind.KeyOfKeyword:
                     links.resolvedType = getIndexType(getTypeFromTypeNode(node.type));
+                    break;
+                case SyntaxKind.AllOfKeyword:
+                    links.resolvedType = createAllOfType(getTypeFromTypeNode(node.type));
+                    break;
+                case SyntaxKind.OneOfKeyword:
+                    links.resolvedType = createOneOfType(getTypeFromTypeNode(node.type));
                     break;
                 case SyntaxKind.UniqueKeyword:
                     links.resolvedType = node.type.kind === SyntaxKind.SymbolKeyword
@@ -19053,46 +19091,65 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         if (flags & TypeFlags.UnionOrIntersection) {
             const origin = type.flags & TypeFlags.Union ? (type as UnionType).origin : undefined;
             const types = origin && origin.flags & TypeFlags.UnionOrIntersection ? (origin as UnionOrIntersectionType).types : (type as UnionOrIntersectionType).types;
-            const newTypes = instantiateTypes(types, mapper);
-            if (newTypes === types && aliasSymbol === type.aliasSymbol) {
-                return type;
-            }
-            const newAliasSymbol = aliasSymbol || type.aliasSymbol;
-            const newAliasTypeArguments = aliasSymbol ? aliasTypeArguments : instantiateTypes(type.aliasTypeArguments, mapper);
-            return flags & TypeFlags.Intersection || origin && origin.flags & TypeFlags.Intersection ?
-                getIntersectionType(newTypes, newAliasSymbol, newAliasTypeArguments) :
-                getUnionType(newTypes, UnionReduction.Literal, newAliasSymbol, newAliasTypeArguments);
+            return mapOneOfTypes(instantiateTypes(types, mapper), newTypes => {
+                if (newTypes === types && aliasSymbol === type.aliasSymbol) {
+                    return type;
+                }
+                const newAliasSymbol = aliasSymbol || type.aliasSymbol;
+                return mapOneOfTypes(aliasSymbol ? aliasTypeArguments : instantiateTypes(type.aliasTypeArguments, mapper), newAliasTypeArguments => {
+                    return flags & TypeFlags.Intersection || origin && origin.flags & TypeFlags.Intersection ?
+                        getIntersectionType(newTypes, newAliasSymbol, newAliasTypeArguments) :
+                        getUnionType(newTypes, UnionReduction.Literal, newAliasSymbol, newAliasTypeArguments);
+                });
+            });
+        }
+        if (flags & TypeFlags.OneOf) {
+            return getOneOfType(instantiateType((type as OneOfType).origin, mapper));
+        }
+        if (flags & TypeFlags.AllOf) {
+            return getAllOfType(instantiateType((type as AllOfType).origin, mapper));
         }
         if (flags & TypeFlags.Index) {
-            return getIndexType(instantiateType((type as IndexType).type, mapper));
+            return mapOneOfType(instantiateType((type as IndexType).type, mapper), getIndexType);
         }
         if (flags & TypeFlags.TemplateLiteral) {
-            return getTemplateLiteralType((type as TemplateLiteralType).texts, instantiateTypes((type as TemplateLiteralType).types, mapper));
+            return mapOneOfTypes(instantiateTypes((type as TemplateLiteralType).types, mapper), types => getTemplateLiteralType((type as TemplateLiteralType).texts, types));
         }
         if (flags & TypeFlags.StringMapping) {
-            return getStringMappingType((type as StringMappingType).symbol, instantiateType((type as StringMappingType).type, mapper));
+            return mapOneOfType(instantiateType((type as StringMappingType).type, mapper), type => getStringMappingType((type as StringMappingType).symbol, type));
         }
         if (flags & TypeFlags.IndexedAccess) {
             const newAliasSymbol = aliasSymbol || type.aliasSymbol;
-            const newAliasTypeArguments = aliasSymbol ? aliasTypeArguments : instantiateTypes(type.aliasTypeArguments, mapper);
-            return getIndexedAccessType(instantiateType((type as IndexedAccessType).objectType, mapper), instantiateType((type as IndexedAccessType).indexType, mapper), (type as IndexedAccessType).accessFlags, /*accessNode*/ undefined, newAliasSymbol, newAliasTypeArguments);
+            return mapOneOfTypes(aliasSymbol ? aliasTypeArguments : instantiateTypes(type.aliasTypeArguments, mapper), newAliasTypeArguments => {
+                return mapOneOfTypes([
+                    instantiateType((type as IndexedAccessType).objectType, mapper),
+                    instantiateType((type as IndexedAccessType).indexType, mapper),
+                ], ([objectType, indexType]) => {
+                    return getIndexedAccessType(objectType, indexType, (type as IndexedAccessType).accessFlags, /*accessNode*/ undefined, newAliasSymbol, newAliasTypeArguments);
+                });
+            });
         }
         if (flags & TypeFlags.Conditional) {
-            return getConditionalTypeInstantiation(type as ConditionalType, combineTypeMappers((type as ConditionalType).mapper, mapper), aliasSymbol, aliasTypeArguments);
+            return mapOneOfTypes(aliasTypeArguments, aliasTypeArguments => {
+                return getConditionalTypeInstantiation(type as ConditionalType, combineTypeMappers((type as ConditionalType).mapper, mapper), aliasSymbol, aliasTypeArguments);
+            });
         }
         if (flags & TypeFlags.Substitution) {
-            const newBaseType = instantiateType((type as SubstitutionType).baseType, mapper);
-            const newConstraint = instantiateType((type as SubstitutionType).constraint, mapper);
-            // A substitution type originates in the true branch of a conditional type and can be resolved
-            // to just the base type in the same cases as the conditional type resolves to its true branch
-            // (because the base type is then known to satisfy the constraint).
-            if (newBaseType.flags & TypeFlags.TypeVariable && isGenericType(newConstraint)) {
-                return getSubstitutionType(newBaseType, newConstraint);
-            }
-            if (newConstraint.flags & TypeFlags.AnyOrUnknown || isTypeAssignableTo(getRestrictiveInstantiation(newBaseType), getRestrictiveInstantiation(newConstraint))) {
-                return newBaseType;
-            }
-            return newBaseType.flags & TypeFlags.TypeVariable ? getSubstitutionType(newBaseType, newConstraint) : getIntersectionType([newConstraint, newBaseType]);
+            return mapOneOfTypes([
+                instantiateType((type as SubstitutionType).baseType, mapper),
+                instantiateType((type as SubstitutionType).constraint, mapper),
+            ], ([newBaseType, newConstraint]) => {
+                // A substitution type originates in the true branch of a conditional type and can be resolved
+                // to just the base type in the same cases as the conditional type resolves to its true branch
+                // (because the base type is then known to satisfy the constraint).
+                if (newBaseType.flags & TypeFlags.TypeVariable && isGenericType(newConstraint)) {
+                    return getSubstitutionType(newBaseType, newConstraint);
+                }
+                if (newConstraint.flags & TypeFlags.AnyOrUnknown || isTypeAssignableTo(getRestrictiveInstantiation(newBaseType), getRestrictiveInstantiation(newConstraint))) {
+                    return newBaseType;
+                }
+                return newBaseType.flags & TypeFlags.TypeVariable ? getSubstitutionType(newBaseType, newConstraint) : getIntersectionType([newConstraint, newBaseType]);
+            });
         }
         return type;
     }
@@ -26061,6 +26118,23 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         return type.flags & TypeFlags.Union && aliasSymbol ?
             getUnionType(map((type as UnionType).types, mapper), UnionReduction.Literal, aliasSymbol, aliasTypeArguments) :
             mapType(type, mapper);
+    }
+
+    // Conditionally map over the constituents depending on whether `oneof` is present.
+    function mapOneOfType(type: Type, mapper: (t: Type) => Type): Type;
+    function mapOneOfType(type: Type | undefined, mapper: (t: Type | undefined) => Type): Type;
+    function mapOneOfType(type: Type | undefined, mapper: (t: Type) => Type): Type {
+        return type !== undefined && type.flags & TypeFlags.OneOf
+            ? getOneOfType(mapType((type as OneOfType).origin, mapper, /*noReductions*/ true))
+            : (mapper as (ts: Type | undefined) => Type)(type);
+    }
+
+    function mapOneOfTypes(types: readonly Type[], mapper: (ts: readonly Type[]) => Type): Type;
+    function mapOneOfTypes(types: readonly Type[] | undefined, mapper: (ts: readonly Type[] | undefined) => Type): Type;
+    function mapOneOfTypes(types: readonly Type[] | undefined, mapper: (ts: readonly Type[]) => Type): Type {
+        return types === undefined || types.length === 0
+            ? (mapper as (ts: readonly Type[] | undefined) => Type)(types)
+            : mapOneOfType(types[0], first => mapOneOfTypes(types.slice(1), ts => mapper([first, ...ts])));
     }
 
     function extractTypesOfKind(type: Type, kind: TypeFlags) {

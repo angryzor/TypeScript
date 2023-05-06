@@ -187,6 +187,7 @@ export const enum SyntaxKind {
     // Contextual keywords
     AbstractKeyword,
     AccessorKeyword,
+    AllOfKeyword,
     AsKeyword,
     AssertsKeyword,
     AssertKeyword,
@@ -209,6 +210,7 @@ export const enum SyntaxKind {
     RequireKeyword,
     NumberKeyword,
     ObjectKeyword,
+    OneOfKeyword,
     SatisfiesKeyword,
     SetKeyword,
     StringKeyword,
@@ -587,6 +589,7 @@ export type PunctuationOrKeywordSyntaxKind = PunctuationSyntaxKind | KeywordSynt
 export type KeywordSyntaxKind =
     | SyntaxKind.AbstractKeyword
     | SyntaxKind.AccessorKeyword
+    | SyntaxKind.AllOfKeyword
     | SyntaxKind.AnyKeyword
     | SyntaxKind.AsKeyword
     | SyntaxKind.AssertsKeyword
@@ -637,6 +640,7 @@ export type KeywordSyntaxKind =
     | SyntaxKind.NumberKeyword
     | SyntaxKind.ObjectKeyword
     | SyntaxKind.OfKeyword
+    | SyntaxKind.OneOfKeyword
     | SyntaxKind.PackageKeyword
     | SyntaxKind.PrivateKeyword
     | SyntaxKind.ProtectedKeyword
@@ -2298,7 +2302,7 @@ export interface ParenthesizedTypeNode extends TypeNode {
 
 export interface TypeOperatorNode extends TypeNode {
     readonly kind: SyntaxKind.TypeOperator;
-    readonly operator: SyntaxKind.KeyOfKeyword | SyntaxKind.UniqueKeyword | SyntaxKind.ReadonlyKeyword;
+    readonly operator: SyntaxKind.KeyOfKeyword | SyntaxKind.AllOfKeyword | SyntaxKind.OneOfKeyword | SyntaxKind.UniqueKeyword | SyntaxKind.ReadonlyKeyword;
     readonly type: TypeNode;
 }
 
@@ -6096,6 +6100,8 @@ export const enum TypeFlags {
     NonPrimitive    = 1 << 26,  // intrinsic object type
     TemplateLiteral = 1 << 27,  // Template literal type
     StringMapping   = 1 << 28,  // Uppercase/Lowercase type
+    OneOf           = 1 << 29,  // oneof T
+    AllOf           = 1 << 30,  // allof T
 
     /** @internal */
     AnyOrUnknown = Any | Unknown,
@@ -6126,7 +6132,7 @@ export const enum TypeFlags {
     /** @internal */
     DisjointDomains = NonPrimitive | StringLike | NumberLike | BigIntLike | BooleanLike | ESSymbolLike | VoidLike | Null,
     UnionOrIntersection = Union | Intersection,
-    StructuredType = Object | Union | Intersection,
+    StructuredType = Object | Union | Intersection | OneOf | AllOf,
     TypeVariable = TypeParameter | IndexedAccess,
     InstantiableNonPrimitive = TypeVariable | Conditional | Substitution,
     InstantiablePrimitive = Index | TemplateLiteral | StringMapping,
@@ -6468,6 +6474,14 @@ export interface IntersectionType extends UnionOrIntersectionType {
     resolvedApparentType: Type;
     /** @internal */
     uniqueLiteralFilledInstantiation?: Type;  // Instantiation with type parameters mapped to never type
+}
+
+export interface OneOfType extends Type {
+    origin: Type
+}
+
+export interface AllOfType extends Type {
+    origin: Type
 }
 
 export type StructuredType = ObjectType | UnionType | IntersectionType;
@@ -8419,7 +8433,7 @@ export interface NodeFactory {
     createParenthesizedType(type: TypeNode): ParenthesizedTypeNode;
     updateParenthesizedType(node: ParenthesizedTypeNode, type: TypeNode): ParenthesizedTypeNode;
     createThisTypeNode(): ThisTypeNode;
-    createTypeOperatorNode(operator: SyntaxKind.KeyOfKeyword | SyntaxKind.UniqueKeyword | SyntaxKind.ReadonlyKeyword, type: TypeNode): TypeOperatorNode;
+    createTypeOperatorNode(operator: SyntaxKind.KeyOfKeyword | SyntaxKind.AllOfKeyword | SyntaxKind.OneOfKeyword | SyntaxKind.UniqueKeyword | SyntaxKind.ReadonlyKeyword, type: TypeNode): TypeOperatorNode;
     updateTypeOperatorNode(node: TypeOperatorNode, type: TypeNode): TypeOperatorNode;
     createIndexedAccessTypeNode(objectType: TypeNode, indexType: TypeNode): IndexedAccessTypeNode;
     updateIndexedAccessTypeNode(node: IndexedAccessTypeNode, objectType: TypeNode, indexType: TypeNode): IndexedAccessTypeNode;
