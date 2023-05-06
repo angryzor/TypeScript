@@ -13472,6 +13472,9 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             else if (type.flags & TypeFlags.Intersection) {
                 resolveIntersectionTypeMembers(type as IntersectionType);
             }
+            else if (type.flags & TypeFlags.OneOf) {
+                resolveIntersectionTypeMembers(type as IntersectionType);
+            }
             else {
                 Debug.fail("Unhandled type " + Debug.formatTypeFlags(type.flags));
             }
@@ -16926,7 +16929,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
     }
 
     function getAllOfType(origin: Type) {
-        return origin.flags & TypeFlags.OneOf ? (origin as OneOfType).origin : origin
+        return origin.flags & TypeFlags.OneOf ? (origin as OneOfType).origin : origin;
     }
 
     function createOneOfType(origin: Type) {
@@ -17113,10 +17116,10 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                     links.resolvedType = getIndexType(getTypeFromTypeNode(node.type));
                     break;
                 case SyntaxKind.AllOfKeyword:
-                    links.resolvedType = createAllOfType(getTypeFromTypeNode(node.type));
+                    links.resolvedType = getAllOfType(getTypeFromTypeNode(node.type));
                     break;
                 case SyntaxKind.OneOfKeyword:
-                    links.resolvedType = createOneOfType(getTypeFromTypeNode(node.type));
+                    links.resolvedType = getOneOfType(getTypeFromTypeNode(node.type));
                     break;
                 case SyntaxKind.UniqueKeyword:
                     links.resolvedType = node.type.kind === SyntaxKind.SymbolKeyword
