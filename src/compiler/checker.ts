@@ -13472,9 +13472,6 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             else if (type.flags & TypeFlags.Intersection) {
                 resolveIntersectionTypeMembers(type as IntersectionType);
             }
-            else if (type.flags & TypeFlags.OneOf) {
-                resolveIntersectionTypeMembers(type as IntersectionType);
-            }
             else {
                 Debug.fail("Unhandled type " + Debug.formatTypeFlags(type.flags));
             }
@@ -16929,7 +16926,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
     }
 
     function getAllOfType(origin: Type) {
-        return origin.flags & TypeFlags.OneOf ? (origin as OneOfType).origin : origin;
+        return origin.flags & TypeFlags.OneOf ? (origin as OneOfType).origin : createAllOfType(origin);
     }
 
     function createOneOfType(origin: Type) {
