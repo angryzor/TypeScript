@@ -19091,65 +19091,46 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         if (flags & TypeFlags.UnionOrIntersection) {
             const origin = type.flags & TypeFlags.Union ? (type as UnionType).origin : undefined;
             const types = origin && origin.flags & TypeFlags.UnionOrIntersection ? (origin as UnionOrIntersectionType).types : (type as UnionOrIntersectionType).types;
-            return mapOneOfTypes(instantiateTypes(types, mapper), newTypes => {
-                if (newTypes === types && aliasSymbol === type.aliasSymbol) {
-                    return type;
-                }
-                const newAliasSymbol = aliasSymbol || type.aliasSymbol;
-                return mapOneOfTypes(aliasSymbol ? aliasTypeArguments : instantiateTypes(type.aliasTypeArguments, mapper), newAliasTypeArguments => {
-                    return flags & TypeFlags.Intersection || origin && origin.flags & TypeFlags.Intersection ?
-                        getIntersectionType(newTypes, newAliasSymbol, newAliasTypeArguments) :
-                        getUnionType(newTypes, UnionReduction.Literal, newAliasSymbol, newAliasTypeArguments);
-                });
-            });
-        }
-        if (flags & TypeFlags.OneOf) {
-            return getOneOfType(instantiateType((type as OneOfType).origin, mapper));
-        }
-        if (flags & TypeFlags.AllOf) {
-            return getAllOfType(instantiateType((type as AllOfType).origin, mapper));
+            const newTypes = instantiateTypes(types, mapper);
+            if (newTypes === types && aliasSymbol === type.aliasSymbol) {
+                return type;
+            }
+            const newAliasSymbol = aliasSymbol || type.aliasSymbol;
+            const newAliasTypeArguments = aliasSymbol ? aliasTypeArguments : instantiateTypes(type.aliasTypeArguments, mapper);
+            return flags & TypeFlags.Intersection || origin && origin.flags & TypeFlags.Intersection ?
+                getIntersectionType(newTypes, newAliasSymbol, newAliasTypeArguments) :
+                getUnionType(newTypes, UnionReduction.Literal, newAliasSymbol, newAliasTypeArguments);
         }
         if (flags & TypeFlags.Index) {
-            return mapOneOfType(instantiateType((type as IndexType).type, mapper), getIndexType);
+            return getIndexType(instantiateType((type as IndexType).type, mapper));
         }
         if (flags & TypeFlags.TemplateLiteral) {
-            return mapOneOfTypes(instantiateTypes((type as TemplateLiteralType).types, mapper), types => getTemplateLiteralType((type as TemplateLiteralType).texts, types));
+            return getTemplateLiteralType((type as TemplateLiteralType).texts, instantiateTypes((type as TemplateLiteralType).types, mapper));
         }
         if (flags & TypeFlags.StringMapping) {
-            return mapOneOfType(instantiateType((type as StringMappingType).type, mapper), type => getStringMappingType((type as StringMappingType).symbol, type));
+            return getStringMappingType((type as StringMappingType).symbol, instantiateType((type as StringMappingType).type, mapper));
         }
         if (flags & TypeFlags.IndexedAccess) {
             const newAliasSymbol = aliasSymbol || type.aliasSymbol;
-            return mapOneOfTypes(aliasSymbol ? aliasTypeArguments : instantiateTypes(type.aliasTypeArguments, mapper), newAliasTypeArguments => {
-                return mapOneOfTypes([
-                    instantiateType((type as IndexedAccessType).objectType, mapper),
-                    instantiateType((type as IndexedAccessType).indexType, mapper),
-                ], ([objectType, indexType]) => {
-                    return getIndexedAccessType(objectType, indexType, (type as IndexedAccessType).accessFlags, /*accessNode*/ undefined, newAliasSymbol, newAliasTypeArguments);
-                });
-            });
+            const newAliasTypeArguments = aliasSymbol ? aliasTypeArguments : instantiateTypes(type.aliasTypeArguments, mapper);
+            return getIndexedAccessType(instantiateType((type as IndexedAccessType).objectType, mapper), instantiateType((type as IndexedAccessType).indexType, mapper), (type as IndexedAccessType).accessFlags, /*accessNode*/ undefined, newAliasSymbol, newAliasTypeArguments);
         }
         if (flags & TypeFlags.Conditional) {
-            return mapOneOfTypes(aliasTypeArguments, aliasTypeArguments => {
-                return getConditionalTypeInstantiation(type as ConditionalType, combineTypeMappers((type as ConditionalType).mapper, mapper), aliasSymbol, aliasTypeArguments);
-            });
+            return getConditionalTypeInstantiation(type as ConditionalType, combineTypeMappers((type as ConditionalType).mapper, mapper), aliasSymbol, aliasTypeArguments);
         }
         if (flags & TypeFlags.Substitution) {
-            return mapOneOfTypes([
-                instantiateType((type as SubstitutionType).baseType, mapper),
-                instantiateType((type as SubstitutionType).constraint, mapper),
-            ], ([newBaseType, newConstraint]) => {
-                // A substitution type originates in the true branch of a conditional type and can be resolved
-                // to just the base type in the same cases as the conditional type resolves to its true branch
-                // (because the base type is then known to satisfy the constraint).
-                if (newBaseType.flags & TypeFlags.TypeVariable && isGenericType(newConstraint)) {
-                    return getSubstitutionType(newBaseType, newConstraint);
-                }
-                if (newConstraint.flags & TypeFlags.AnyOrUnknown || isTypeAssignableTo(getRestrictiveInstantiation(newBaseType), getRestrictiveInstantiation(newConstraint))) {
-                    return newBaseType;
-                }
-                return newBaseType.flags & TypeFlags.TypeVariable ? getSubstitutionType(newBaseType, newConstraint) : getIntersectionType([newConstraint, newBaseType]);
-            });
+            const newBaseType = instantiateType((type as SubstitutionType).baseType, mapper);
+            const newConstraint = instantiateType((type as SubstitutionType).constraint, mapper);
+            // A substitution type originates in the true branch of a conditional type and can be resolved
+            // to just the base type in the same cases as the conditional type resolves to its true branch
+            // (because the base type is then known to satisfy the constraint).
+            if (newBaseType.flags & TypeFlags.TypeVariable && isGenericType(newConstraint)) {
+                return getSubstitutionType(newBaseType, newConstraint);
+            }
+            if (newConstraint.flags & TypeFlags.AnyOrUnknown || isTypeAssignableTo(getRestrictiveInstantiation(newBaseType), getRestrictiveInstantiation(newConstraint))) {
+                return newBaseType;
+            }
+            return newBaseType.flags & TypeFlags.TypeVariable ? getSubstitutionType(newBaseType, newConstraint) : getIntersectionType([newConstraint, newBaseType]);
         }
         return type;
     }
