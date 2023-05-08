@@ -6132,7 +6132,7 @@ export const enum TypeFlags {
     /** @internal */
     DisjointDomains = NonPrimitive | StringLike | NumberLike | BigIntLike | BooleanLike | ESSymbolLike | VoidLike | Null,
     UnionOrIntersection = Union | Intersection,
-    StructuredType = Object | Union | Intersection,
+    StructuredType = Object | Union | Intersection | OneOf,
     TypeVariable = TypeParameter | IndexedAccess,
     InstantiableNonPrimitive = TypeVariable | Conditional | Substitution,
     InstantiablePrimitive = Index | TemplateLiteral | StringMapping,

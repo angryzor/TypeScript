@@ -19101,6 +19101,12 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 getIntersectionType(newTypes, newAliasSymbol, newAliasTypeArguments) :
                 getUnionType(newTypes, UnionReduction.Literal, newAliasSymbol, newAliasTypeArguments);
         }
+        if (flags & TypeFlags.OneOf) {
+            return getOneOfType(instantiateType((type as OneOfType).origin, mapper));
+        }
+        if (flags & TypeFlags.AllOf) {
+            return getAllOfType(instantiateType((type as AllOfType).origin, mapper));
+        }
         if (flags & TypeFlags.Index) {
             return getIndexType(instantiateType((type as IndexType).type, mapper));
         }
@@ -20737,8 +20743,8 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
 
                 traceUnionsOrIntersectionsTooLarge(source, target);
 
-                const skipCaching = source.flags & TypeFlags.Union && (source as UnionType).types.length < 4 && !(target.flags & TypeFlags.Union) ||
-                    target.flags & TypeFlags.Union && (target as UnionType).types.length < 4 && !(source.flags & TypeFlags.StructuredOrInstantiable);
+                const skipCaching = !(source.flags | target.flags & TypeFlags.OneOf) && source.flags & TypeFlags.Union && (source as UnionType).types.length < 4 && !(target.flags & TypeFlags.Union) ||
+                    target.flags & TypeFlags.Union && (target as UnionType).types.length < 4 && !(source.flags & TypeFlags.StructuredOrInstantiable)
                 const result = skipCaching ?
                     unionOrIntersectionRelatedTo(source, target, reportErrors, intersectionState) :
                     recursiveTypeRelatedTo(source, target, reportErrors, intersectionState, recursionFlags);
@@ -21339,6 +21345,16 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             let varianceCheckFailed = false;
             let sourceFlags = source.flags;
             const targetFlags = target.flags;
+            if (sourceFlags & TypeFlags.OneOf) {
+                return (source as OneOfType).origin.flags & TypeFlags.Union
+                    ? eachTypeRelatedToType((source as OneOfType).origin as UnionType, target, /*reportErrors*/ false, intersectionState)
+                    : isRelatedTo((source as OneOfType).origin, target, RecursionFlags.Source);
+            }
+            if (targetFlags & TypeFlags.OneOf) {
+                return (target as OneOfType).origin.flags & TypeFlags.Union
+                    ? typeRelatedToSomeType(source, (target as OneOfType).origin as UnionType, /*reportErrors*/ false)
+                    : isRelatedTo(source, (target as OneOfType).origin, RecursionFlags.Target);
+            }
             if (relation === identityRelation) {
                 // We've already checked that source.flags and target.flags are identical
                 if (sourceFlags & TypeFlags.UnionOrIntersection) {
@@ -26101,22 +26117,22 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             mapType(type, mapper);
     }
 
-    // Conditionally map over the constituents depending on whether `oneof` is present.
-    function mapOneOfType(type: Type, mapper: (t: Type) => Type): Type;
-    function mapOneOfType(type: Type | undefined, mapper: (t: Type | undefined) => Type): Type;
-    function mapOneOfType(type: Type | undefined, mapper: (t: Type) => Type): Type {
-        return type !== undefined && type.flags & TypeFlags.OneOf
-            ? getOneOfType(mapType((type as OneOfType).origin, mapper, /*noReductions*/ true))
-            : (mapper as (ts: Type | undefined) => Type)(type);
-    }
+    // // Conditionally map over the constituents depending on whether `oneof` is present.
+    // function mapOneOfType(type: Type, mapper: (t: Type) => Type): Type;
+    // function mapOneOfType(type: Type | undefined, mapper: (t: Type | undefined) => Type): Type;
+    // function mapOneOfType(type: Type | undefined, mapper: (t: Type) => Type): Type {
+    //     return type !== undefined && type.flags & TypeFlags.OneOf
+    //         ? getOneOfType(mapType((type as OneOfType).origin, mapper, /*noReductions*/ true))
+    //         : (mapper as (ts: Type | undefined) => Type)(type);
+    // }
 
-    function mapOneOfTypes(types: readonly Type[], mapper: (ts: readonly Type[]) => Type): Type;
-    function mapOneOfTypes(types: readonly Type[] | undefined, mapper: (ts: readonly Type[] | undefined) => Type): Type;
-    function mapOneOfTypes(types: readonly Type[] | undefined, mapper: (ts: readonly Type[]) => Type): Type {
-        return types === undefined || types.length === 0
-            ? (mapper as (ts: readonly Type[] | undefined) => Type)(types)
-            : mapOneOfType(types[0], first => mapOneOfTypes(types.slice(1), ts => mapper([first, ...ts])));
-    }
+    // function mapOneOfTypes(types: readonly Type[], mapper: (ts: readonly Type[]) => Type): Type;
+    // function mapOneOfTypes(types: readonly Type[] | undefined, mapper: (ts: readonly Type[] | undefined) => Type): Type;
+    // function mapOneOfTypes(types: readonly Type[] | undefined, mapper: (ts: readonly Type[]) => Type): Type {
+    //     return types === undefined || types.length === 0
+    //         ? (mapper as (ts: readonly Type[] | undefined) => Type)(types)
+    //         : mapOneOfType(types[0], first => mapOneOfTypes(types.slice(1), ts => mapper([first, ...ts])));
+    // }
 
     function extractTypesOfKind(type: Type, kind: TypeFlags) {
         return filterType(type, t => (t.flags & kind) !== 0);
