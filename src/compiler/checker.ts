@@ -14283,6 +14283,9 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         if (type.flags & TypeFlags.UnionOrIntersection) {
             return getPropertyOfUnionOrIntersectionType(type as UnionOrIntersectionType, name, skipObjectFunctionPropertyAugment);
         }
+        if (type.flags & TypeFlags.OneOf) {
+            return getPropertyOfType((type as OneOfType).origin, name, skipObjectFunctionPropertyAugment);
+        }
         return undefined;
     }
 
@@ -16929,7 +16932,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         return origin.flags & TypeFlags.OneOf ? (origin as OneOfType).origin : createAllOfType(origin);
     }
 
-    function createOneOfType(origin: Type) {
+    function createOneOfType(origin: UnionType) {
         const result = createType(TypeFlags.OneOf) as OneOfType;
         result.origin = origin;
         return result;
@@ -16939,8 +16942,8 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         // Squash nested oneofs. `mapType` will join the unions.
         const mapped = mapType(origin, type => type.flags & TypeFlags.OneOf ? (type as OneOfType).origin : type);
 
-        // Don't repack unary types. Their type is definite.
-        return mapped.flags & TypeFlags.Union ? createOneOfType(mapped) : mapped;
+        // Don't pack unary types. Their type is definite.
+        return mapped.flags & TypeFlags.Union ? createOneOfType(mapped as UnionType) : mapped;
     }
 
     function createIndexType(type: InstantiableType | UnionOrIntersectionType, indexFlags: IndexFlags) {
@@ -20324,10 +20327,12 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         let overrideNextErrorInfo = 0; // How many `reportRelationError` calls should be skipped in the elaboration pyramid
         let lastSkippedInfo: [Type, Type] | undefined;
         let incompatibleStack: DiagnosticAndArguments[] | undefined;
+        const sourceOneOfInstantiations = new Map<Type, Type>();
+        const targetOneOfInstantiations = new Map<Type, Type>();
 
         Debug.assert(relation !== identityRelation || !errorNode, "no error reporting in identity checking");
 
-        const result = isRelatedTo(source, target, RecursionFlags.Both, /*reportErrors*/ !!errorNode, headMessage);
+        const result = tryOneOfInstantiations(source, target, RecursionFlags.Both, /*reportErrors*/ !!errorNode, headMessage);
         if (incompatibleStack) {
             reportIncompatibleStack();
         }
@@ -20653,6 +20658,28 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
          * * Ternary.False if they are not related.
          */
         function isRelatedTo(originalSource: Type, originalTarget: Type, recursionFlags: RecursionFlags = RecursionFlags.Both, reportErrors = false, headMessage?: DiagnosticMessage, intersectionState = IntersectionState.None): Ternary {
+            if (originalSource.flags & TypeFlags.OneOf) {
+                originalSource = sourceOneOfInstantiations.get(originalSource)!;
+            }
+
+            if (originalTarget.flags & TypeFlags.OneOf) {
+                originalTarget = targetOneOfInstantiations.get(originalTarget)!;
+            }
+
+            if (originalSource.flags & TypeFlags.IndexedAccess && (originalSource as IndexedAccessType).objectType.flags & TypeFlags.OneOf) {
+                originalSource = getIndexedAccessType(
+                    sourceOneOfInstantiations.get((originalSource as IndexedAccessType).objectType)!,
+                    (originalSource as IndexedAccessType).indexType,
+                );
+            }
+
+            if (originalTarget.flags & TypeFlags.IndexedAccess && (originalTarget as IndexedAccessType).objectType.flags & TypeFlags.OneOf) {
+                originalTarget = getIndexedAccessType(
+                    targetOneOfInstantiations.get((originalTarget as IndexedAccessType).objectType)!,
+                    (originalTarget as IndexedAccessType).indexType,
+                );
+            }
+
             // Before normalization: if `source` is type an object type, and `target` is primitive,
             // skip all the checks we don't need and just return `isSimpleTypeRelatedTo` result
             if (originalSource.flags & TypeFlags.Object && originalTarget.flags & TypeFlags.Primitive) {
@@ -20743,8 +20770,8 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
 
                 traceUnionsOrIntersectionsTooLarge(source, target);
 
-                const skipCaching = !(source.flags | target.flags & TypeFlags.OneOf) && source.flags & TypeFlags.Union && (source as UnionType).types.length < 4 && !(target.flags & TypeFlags.Union) ||
-                    target.flags & TypeFlags.Union && (target as UnionType).types.length < 4 && !(source.flags & TypeFlags.StructuredOrInstantiable)
+                const skipCaching = source.flags & TypeFlags.Union && (source as UnionType).types.length < 4 && !(target.flags & TypeFlags.Union) ||
+                    target.flags & TypeFlags.Union && (target as UnionType).types.length < 4 && !(source.flags & TypeFlags.StructuredOrInstantiable);
                 const result = skipCaching ?
                     unionOrIntersectionRelatedTo(source, target, reportErrors, intersectionState) :
                     recursiveTypeRelatedTo(source, target, reportErrors, intersectionState, recursionFlags);
@@ -21099,6 +21126,58 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             return result;
         }
 
+        function tryOneOfInstantiations(source: Type, target: Type, recursionFlags?: RecursionFlags, reportErrors?: boolean, headMessage?: DiagnosticMessage, intersectionState?: IntersectionState) {
+            // We only keep oneOfs that haven't been bound earlier.
+            const sourceOneOfs = [...getFreeOneOfsOfType(source)].filter(oneOf => !sourceOneOfInstantiations.has(oneOf));
+            const targetOneOfs = [...getFreeOneOfsOfType(target)].filter(oneOf => !targetOneOfInstantiations.has(oneOf));
+
+            const sourceInstantiations = sourceOneOfs.length === 0 ? [[]] : cartesianProduct(sourceOneOfs.map(oneOf => oneOf.origin.types));
+            const targetInstantiations = targetOneOfs.length === 0 ? [[]] : cartesianProduct(targetOneOfs.map(oneOf => oneOf.origin.types));
+
+            let result = Ternary.True;
+            for (const sourceInstantiation of sourceInstantiations) {
+                for (let i = 0; i < sourceOneOfs.length; i++) {
+                    sourceOneOfInstantiations.set(sourceOneOfs[i], sourceInstantiation[i]);
+                }
+
+                const saveErrorInfo = captureErrorCalculationState();
+                let intermediateResult = Ternary.False;
+
+                for (const targetInstantiation of targetInstantiations) {
+                    // Only keep the last error.
+                    resetErrorInfo(saveErrorInfo);
+
+                    for (let i = 0; i < targetOneOfs.length; i++) {
+                        targetOneOfInstantiations.set(targetOneOfs[i], targetInstantiation[i]);
+                    }
+
+                    const related = isRelatedTo(source, target, recursionFlags, reportErrors, headMessage, intersectionState);
+
+                    if (related) {
+                        intermediateResult = related;
+                        break;
+                    }
+                }
+
+                if (!intermediateResult) {
+                    result = Ternary.False;
+                    break;
+                }
+
+                result &= intermediateResult;
+            }
+
+            for (const oneOf of sourceOneOfs) {
+                sourceOneOfInstantiations.delete(oneOf);
+            }
+
+            for (const oneOf of targetOneOfs) {
+                targetOneOfInstantiations.delete(oneOf);
+            }
+
+            return result;
+        }
+
         function typeArgumentsRelatedTo(sources: readonly Type[] = emptyArray, targets: readonly Type[] = emptyArray, variances: readonly VarianceFlags[] = emptyArray, reportErrors: boolean, intersectionState: IntersectionState): Ternary {
             if (sources.length !== targets.length && relation === identityRelation) {
                 return Ternary.False;
@@ -21345,16 +21424,6 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             let varianceCheckFailed = false;
             let sourceFlags = source.flags;
             const targetFlags = target.flags;
-            if (sourceFlags & TypeFlags.OneOf) {
-                return (source as OneOfType).origin.flags & TypeFlags.Union
-                    ? eachTypeRelatedToType((source as OneOfType).origin as UnionType, target, /*reportErrors*/ false, intersectionState)
-                    : isRelatedTo((source as OneOfType).origin, target, RecursionFlags.Source);
-            }
-            if (targetFlags & TypeFlags.OneOf) {
-                return (target as OneOfType).origin.flags & TypeFlags.Union
-                    ? typeRelatedToSomeType(source, (target as OneOfType).origin as UnionType, /*reportErrors*/ false)
-                    : isRelatedTo(source, (target as OneOfType).origin, RecursionFlags.Target);
-            }
             if (relation === identityRelation) {
                 // We've already checked that source.flags and target.flags are identical
                 if (sourceFlags & TypeFlags.UnionOrIntersection) {
@@ -25815,6 +25884,64 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
     function recombineUnknownType(type: Type) {
         return type === unknownUnionType ? unknownType : type;
     }
+
+    function getFreeOneOfsOfType(type: Type) {
+        if (!type.freeOneOfs) {
+            type.freeOneOfs = new Set();
+
+            // TypeFlags.AllOf intentionally left out to reset closure
+            if (type.flags & TypeFlags.OneOf) {
+                type.freeOneOfs.add(type as OneOfType);
+
+                getFreeOneOfsOfType((type as OneOfType).origin).forEach(oneOf => type.freeOneOfs?.add(oneOf));
+            }
+            else if (type.flags & TypeFlags.UnionOrIntersection) {
+                for (const child of (type as UnionType).types) {
+                    getFreeOneOfsOfType(child).forEach(oneOf => type.freeOneOfs?.add(oneOf));
+                }
+            }
+            else if (type.flags & TypeFlags.Object) {
+                calculateFreeOneOfsForObjectType(type);
+            }
+            else if (type.flags & TypeFlags.IndexedAccess) {
+                getFreeOneOfsOfType((type as IndexedAccessType).objectType).forEach(oneOf => type.freeOneOfs?.add(oneOf));
+                getFreeOneOfsOfType((type as IndexedAccessType).indexType).forEach(oneOf => type.freeOneOfs?.add(oneOf));
+            }
+        }
+        return type.freeOneOfs;
+    }
+
+    function calculateFreeOneOfsForObjectType(type: Type) {
+        const resolved = resolveStructuredTypeMembers(type as ObjectType);
+
+        for (const property of resolved.properties) {
+            const child = getDeclaredTypeOfSymbol(property);
+
+            getFreeOneOfsOfType(child).forEach(oneOf => type.freeOneOfs?.add(oneOf));
+        }
+
+        // for (const sig of resolved.callSignatures) {
+        //     const child = getDeclaredTypeOfSymbol(sig);
+
+        //     getFreeOneOfsOfType(child).forEach(oneOf => type.freeOneOfs?.add(oneOf));
+        // }
+
+        // for (const sig of resolved.constructSignatures) {
+        //     const child = getDeclaredTypeOfSymbol(sig);
+
+        //     getFreeOneOfsOfType(child).forEach(oneOf => type.freeOneOfs?.add(oneOf));
+        // }
+
+        // for (const sig of resolved.indexInfos) {
+        //     const child = getDeclaredTypeOfSymbol(sig);
+
+        //     getFreeOneOfsOfType(child).forEach(oneOf => type.freeOneOfs?.add(oneOf));
+        // }
+    }
+
+    // function getFreeOneOfsForSignature(signature: Signature) {
+
+    // }
 
     function getTypeWithDefault(type: Type, defaultExpression: Expression) {
         return defaultExpression ?
@@ -31623,7 +31750,10 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 return errorType;
             }
 
-            propType = isThisPropertyAccessInConstructor(node, prop) ? autoType : writeOnly || isWriteOnlyAccess(node) ? getWriteTypeOfSymbol(prop) : getTypeOfSymbol(prop);
+            propType = isThisPropertyAccessInConstructor(node, prop) ? autoType
+                : leftType.flags & TypeFlags.OneOf ? createIndexedAccessType(leftType, createLiteralType(TypeFlags.StringLiteral, symbolName(prop)), AccessFlags.None, /*aliasSymbol*/ undefined, /*aliasTypeArguments*/ undefined)
+                : writeOnly || isWriteOnlyAccess(node) ? getWriteTypeOfSymbol(prop)
+                : getTypeOfSymbol(prop);
         }
 
         return getFlowTypeOfAccessExpression(node, prop, propType, right, checkMode);

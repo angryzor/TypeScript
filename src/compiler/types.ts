@@ -6187,6 +6187,8 @@ export interface Type {
     immediateBaseConstraint?: Type;  // Immediate base constraint cache
     /** @internal */
     widened?: Type; // Cached widened form of the type
+    /** @internal */
+    freeOneOfs?: Set<OneOfType>;
 }
 
 /** @internal */
@@ -6477,7 +6479,7 @@ export interface IntersectionType extends UnionOrIntersectionType {
 }
 
 export interface OneOfType extends Type {
-    origin: Type
+    origin: UnionType
 }
 
 export interface AllOfType extends Type {
