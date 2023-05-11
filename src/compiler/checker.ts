@@ -25928,13 +25928,24 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 calculateFreeOneOfsForObjectType(type as ObjectType);
             }
             else if (type.flags & TypeFlags.IndexedAccess) {
-                if ((type as IndexedAccessType).objectType.flags & TypeFlags.OneOf) {
-                    type.freeOneOfs.set((type as IndexedAccessType).objectType as OneOfType, FreeOneOfFlags.Node);
+                const iat = type as IndexedAccessType;
+
+                if (iat.objectType.flags & TypeFlags.OneOf) {
+                    type.freeOneOfs.set(iat.objectType as OneOfType, FreeOneOfFlags.Node);
                 }
                 else {
-                    addChildOneOfs(type, (type as IndexedAccessType).objectType);
+                    addChildOneOfs(type, iat.objectType);
                 }
-                addChildOneOfs(type, (type as IndexedAccessType).indexType);
+                addChildOneOfs(type, iat.indexType);
+            } else if (type.flags & TypeFlags.TypeParameter) {
+                const tp = type as TypeParameter;
+
+                if (tp.constraint) {
+                    addChildOneOfs(type, tp.constraint);
+                }
+                if (tp.default) {
+                    addChildOneOfs(type, tp.default);
+                }
             }
         }
         return type.freeOneOfs;
@@ -25967,7 +25978,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
     function calculateFreeOneOfsForObjectType(type: ObjectType) {
         const resolved = resolveStructuredTypeMembers(type);
 
-        addChildrenOneOfs(type, resolved.properties.map(getDeclaredTypeOfSymbol));
+        addChildrenOneOfs(type, resolved.properties.map(getTypeOfSymbol));
 
         if (type.objectFlags & ObjectFlags.Reference) {
             addChildrenOneOfs(type, (type as TypeReference).resolvedTypeArguments ?? []);
@@ -31804,7 +31815,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             }
 
             propType = isThisPropertyAccessInConstructor(node, prop) ? autoType
-                : leftType.flags & TypeFlags.OneOf ? createIndexedAccessType(leftType, createLiteralType(TypeFlags.StringLiteral, symbolName(prop)), AccessFlags.None, /*aliasSymbol*/ undefined, /*aliasTypeArguments*/ undefined)
+                : leftType.flags & TypeFlags.OneOf || (leftType.flags & TypeFlags.TypeParameter && (leftType as TypeParameter).constraint && (leftType as TypeParameter).constraint!.flags & TypeFlags.OneOf) ? createIndexedAccessType(leftType, createLiteralType(TypeFlags.StringLiteral, symbolName(prop)), AccessFlags.None, /*aliasSymbol*/ undefined, /*aliasTypeArguments*/ undefined)
                 : writeOnly || isWriteOnlyAccess(node) ? getWriteTypeOfSymbol(prop)
                 : getTypeOfSymbol(prop);
         }
