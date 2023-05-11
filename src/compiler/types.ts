@@ -6167,6 +6167,11 @@ export const enum TypeFlags {
 
 export type DestructuringPattern = BindingPattern | ObjectLiteralExpression | ArrayLiteralExpression;
 
+export enum FreeOneOfFlags {
+    Contains = 0,
+    Node = 1,
+}
+
 /** @internal */
 export type TypeId = number;
 
@@ -6188,7 +6193,7 @@ export interface Type {
     /** @internal */
     widened?: Type; // Cached widened form of the type
     /** @internal */
-    freeOneOfs?: Set<OneOfType>;
+    freeOneOfs?: Map<OneOfType, FreeOneOfFlags>;
 }
 
 /** @internal */
