@@ -17540,6 +17540,18 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             !!(type.flags & TypeFlags.StringMapping) && isPatternLiteralPlaceholderType((type as StringMappingType).type);
     }
 
+    function isOneOfObjectType(type: Type): boolean {
+        if (type.flags & TypeFlags.OneOf) {
+            return true;
+        }
+        if (type.flags & TypeFlags.TypeParameter) {
+            const tp = type as TypeParameter;
+
+            return !!(tp.constraint && tp.constraint.flags & TypeFlags.OneOf);
+        }
+        return false;
+    }
+
     function isGenericType(type: Type): boolean {
         return !!getGenericObjectFlags(type);
     }
@@ -17703,6 +17715,16 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         });
     }
 
+    function getDeferredIndexedAccessType(objectType: Type, indexType: Type, accessFlags = AccessFlags.None, aliasSymbol?: Symbol, aliasTypeArguments?: readonly Type[]) {
+        const persistentAccessFlags = accessFlags & AccessFlags.Persistent;
+        const id = objectType.id + "," + indexType.id + "," + persistentAccessFlags + getAliasId(aliasSymbol, aliasTypeArguments);
+        let type = indexedAccessTypes.get(id);
+        if (!type) {
+            indexedAccessTypes.set(id, type = createIndexedAccessType(objectType, indexType, persistentAccessFlags, aliasSymbol, aliasTypeArguments));
+        }
+        return type;
+    }
+
     function getIndexedAccessTypeOrUndefined(objectType: Type, indexType: Type, accessFlags = AccessFlags.None, accessNode?: ElementAccessExpression | IndexedAccessTypeNode | PropertyName | BindingName | SyntheticExpression, aliasSymbol?: Symbol, aliasTypeArguments?: readonly Type[]): Type | undefined {
         if (objectType === wildcardType || indexType === wildcardType) {
             return wildcardType;
@@ -17722,21 +17744,14 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         // for a generic T and a non-generic K, we eagerly resolve T[K] if it originates in an expression. This is to
         // preserve backwards compatibility. For example, an element access 'this["foo"]' has always been resolved
         // eagerly using the constraint type of 'this' at the given location.
-        if (isGenericIndexType(indexType) || (accessNode && accessNode.kind !== SyntaxKind.IndexedAccessType ?
+        if (isGenericIndexType(indexType) || isOneOfObjectType(objectType) || (accessNode && accessNode.kind !== SyntaxKind.IndexedAccessType ?
             isGenericTupleType(objectType) && !indexTypeLessThan(indexType, objectType.target.fixedLength) :
             isGenericObjectType(objectType) && !(isTupleType(objectType) && indexTypeLessThan(indexType, objectType.target.fixedLength)) || isGenericReducibleType(objectType))) {
             if (objectType.flags & TypeFlags.AnyOrUnknown) {
                 return objectType;
             }
             // Defer the operation by creating an indexed access type.
-            const persistentAccessFlags = accessFlags & AccessFlags.Persistent;
-            const id = objectType.id + "," + indexType.id + "," + persistentAccessFlags + getAliasId(aliasSymbol, aliasTypeArguments);
-            let type = indexedAccessTypes.get(id);
-            if (!type) {
-                indexedAccessTypes.set(id, type = createIndexedAccessType(objectType, indexType, persistentAccessFlags, aliasSymbol, aliasTypeArguments));
-            }
-
-            return type;
+            return getDeferredIndexedAccessType(objectType, indexType, accessFlags, aliasSymbol, aliasTypeArguments);
         }
         // In the following we resolve T[K] to the type of the property in T selected by K.
         // We treat boolean as different from other unions to improve errors;
@@ -31815,7 +31830,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             }
 
             propType = isThisPropertyAccessInConstructor(node, prop) ? autoType
-                : leftType.flags & TypeFlags.OneOf || (leftType.flags & TypeFlags.TypeParameter && (leftType as TypeParameter).constraint && (leftType as TypeParameter).constraint!.flags & TypeFlags.OneOf) ? createIndexedAccessType(leftType, createLiteralType(TypeFlags.StringLiteral, symbolName(prop)), AccessFlags.None, /*aliasSymbol*/ undefined, /*aliasTypeArguments*/ undefined)
+                : isOneOfObjectType(leftType) ? getDeferredIndexedAccessType(leftType, createLiteralType(TypeFlags.StringLiteral, symbolName(prop)), AccessFlags.None, /*aliasSymbol*/ undefined, /*aliasTypeArguments*/ undefined)
                 : writeOnly || isWriteOnlyAccess(node) ? getWriteTypeOfSymbol(prop)
                 : getTypeOfSymbol(prop);
         }
