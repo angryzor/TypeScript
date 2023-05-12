@@ -6484,14 +6484,18 @@ export interface IntersectionType extends UnionOrIntersectionType {
 }
 
 export interface OneOfType extends Type {
-    origin: UnionType
+    origin: UnionType;
+    objectFlags: ObjectFlags;
+    resolvedProperties: Symbol[];
+    /** @internal */
+    propertyCache?: SymbolTable;       // Cache of resolved properties
 }
 
 export interface AllOfType extends Type {
-    origin: Type
+    origin: Type;
 }
 
-export type StructuredType = ObjectType | UnionType | IntersectionType;
+export type StructuredType = ObjectType | UnionType | IntersectionType | OneOfType;
 
 /** @internal */
 // An instantiated anonymous type has a target and a mapper

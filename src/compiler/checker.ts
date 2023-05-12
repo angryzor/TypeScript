@@ -13063,6 +13063,18 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         return append(indexInfos, newInfo);
     }
 
+    function resolveOneOfTypeMembers(type: OneOfType) {
+        const union = type.origin;
+        const resolvedUnion = resolveStructuredTypeMembers(union);
+        const callSignatures = resolvedUnion.callSignatures;
+        const constructSignatures = resolvedUnion.constructSignatures;
+        const indexInfos = resolvedUnion.indexInfos;
+        // const callSignatures = instantiateSignatures(getSignaturesOfType(type.target, SignatureKind.Call), type.mapper!);
+        // const constructSignatures = instantiateSignatures(getSignaturesOfType(type.target, SignatureKind.Construct), type.mapper!);
+        // const indexInfos = instantiateIndexInfos(getIndexInfosOfType(type.target), type.mapper!);
+        setStructuredTypeMembers(type, emptySymbols, callSignatures, constructSignatures, indexInfos);
+    }
+
     /**
      * Converts an AnonymousType to a ResolvedType.
      */
@@ -13473,6 +13485,9 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             else if (type.flags & TypeFlags.Intersection) {
                 resolveIntersectionTypeMembers(type as IntersectionType);
             }
+            else if (type.flags & TypeFlags.OneOf) {
+                resolveOneOfTypeMembers(type as OneOfType);
+            }
             else {
                 Debug.fail("Unhandled type " + Debug.formatTypeFlags(type.flags));
             }
@@ -13524,10 +13539,25 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         return type.resolvedProperties;
     }
 
+    function getPropertiesOfOneOfType(type: OneOfType): Symbol[] {
+        // if (!type.resolvedProperties) {
+        //     const unionProps = getPropertiesOfUnionOrIntersectionType(type.origin);
+
+        //     type.resolvedProperties = unionProps.map(prop => createSymbolWithType(prop, getDeferredIndexedAccessType(type, createLiteralType(TypeFlags.StringLiteral, symbolName(prop)))));
+        // }
+        // return type.resolvedProperties;
+        if (!type.resolvedProperties) {
+            const unionProps = getPropertiesOfUnionOrIntersectionType(type.origin);
+
+            type.resolvedProperties = unionProps;
+        }
+        return type.resolvedProperties;
+    }
+
     function getPropertiesOfType(type: Type): Symbol[] {
         type = getReducedApparentType(type);
-        return type.flags & TypeFlags.UnionOrIntersection ?
-            getPropertiesOfUnionOrIntersectionType(type as UnionType) :
+        return type.flags & TypeFlags.OneOf ? getPropertiesOfOneOfType(type as OneOfType) :
+            type.flags & TypeFlags.UnionOrIntersection ? getPropertiesOfUnionOrIntersectionType(type as UnionType) :
             getPropertiesOfObjectType(type);
     }
 
@@ -14170,6 +14200,23 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         return property && !(getCheckFlags(property) & CheckFlags.ReadPartial) ? property : undefined;
     }
 
+    function getPropertyOfOneOfType(type: OneOfType, name: __String, skipObjectFunctionPropertyAugment?: boolean): Symbol | undefined {
+        // let property = type.propertyCache?.get(name);
+
+        // if (!property) {
+        //     const unionProperty = getPropertyOfUnionOrIntersectionType(type.origin, name, skipObjectFunctionPropertyAugment);
+
+        //     if(unionProperty) {
+        //         property = createSymbolWithType(unionProperty, getDeferredIndexedAccessType(type, createLiteralType(TypeFlags.StringLiteral, symbolName(unionProperty))));
+
+        //         (type.propertyCache ||= createSymbolTable()).set(name, property);
+        //     }
+        // }
+
+        // return property;
+        return getPropertyOfUnionOrIntersectionType(type.origin, name, skipObjectFunctionPropertyAugment);
+    }
+
     /**
      * Return the reduced form of the given type. For a union type, it is a union of the normalized constituent types.
      * For an intersection of types containing one or more mututally exclusive discriminant properties, it is 'never'.
@@ -14285,7 +14332,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             return getPropertyOfUnionOrIntersectionType(type as UnionOrIntersectionType, name, skipObjectFunctionPropertyAugment);
         }
         if (type.flags & TypeFlags.OneOf) {
-            return getPropertyOfType((type as OneOfType).origin, name, skipObjectFunctionPropertyAugment);
+            return getPropertyOfOneOfType(type as OneOfType, name, skipObjectFunctionPropertyAugment);
         }
         return undefined;
     }
