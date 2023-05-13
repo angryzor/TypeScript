@@ -13546,12 +13546,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         //     type.resolvedProperties = unionProps.map(prop => createSymbolWithType(prop, getDeferredIndexedAccessType(type, createLiteralType(TypeFlags.StringLiteral, symbolName(prop)))));
         // }
         // return type.resolvedProperties;
-        if (!type.resolvedProperties) {
-            const unionProps = getPropertiesOfUnionOrIntersectionType(type.origin);
-
-            type.resolvedProperties = unionProps;
-        }
-        return type.resolvedProperties;
+        return getPropertiesOfUnionOrIntersectionType(type.origin);
     }
 
     function getPropertiesOfType(type: Type): Symbol[] {
@@ -20392,6 +20387,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         let incompatibleStack: DiagnosticAndArguments[] | undefined;
         let sourceOneOfTypeMapper: TypeMapper | undefined;
         let targetOneOfTypeMapper: TypeMapper | undefined;
+        let logindent = "";
 
         Debug.assert(relation !== identityRelation || !errorNode, "no error reporting in identity checking");
 
@@ -21200,9 +21196,15 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             const sourceMappers = generateOneOfTypeMappers(source, sourceParentMapper);
             const targetMappers = generateOneOfTypeMappers(target, targetParentMapper);
 
+            console.log(logindent + `${getTypeNameForErrorDisplay(source)} <-> ${getTypeNameForErrorDisplay(target)}`);
+
             let result = Ternary.True;
             for (const sourceMapper of sourceMappers) {
                 sourceOneOfTypeMapper = sourceParentMapper ? mergeTypeMappers(sourceMapper, sourceParentMapper) : sourceMapper;
+
+                if (sourceMappers.length !== 0) {
+                    console.log(logindent + "mapping source", (sourceMapper as Extract<TypeMapper, { kind: TypeMapKind.Array }> | undefined)?.sources.map((oneOf, i) => `${getTypeNameForErrorDisplay(oneOf)} -> ${getTypeNameForErrorDisplay((sourceMapper as Extract<TypeMapper, { kind: TypeMapKind.Array }>).targets![i])}`).join("; "));
+                }
 
                 const saveErrorInfo = captureErrorCalculationState();
                 let intermediateResult = Ternary.False;
@@ -21211,9 +21213,19 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                     // Only keep the last error.
                     resetErrorInfo(saveErrorInfo);
 
+                    if (targetMappers.length !== 0) {
+                        console.log(logindent + "mapping target", (targetMapper as Extract<TypeMapper, { kind: TypeMapKind.Array }> | undefined)?.sources.map((oneOf, i) => `${getTypeNameForErrorDisplay(oneOf)} -> ${getTypeNameForErrorDisplay((targetMapper as Extract<TypeMapper, { kind: TypeMapKind.Array }>).targets![i])}`).join("; "));
+                    }
+
+                    logindent += "  ";
+
                     targetOneOfTypeMapper = targetParentMapper ? mergeTypeMappers(targetMapper, targetParentMapper) : targetMapper;
 
                     const related = isOneRelatedTo(source, target, recursionFlags, reportErrors, headMessage, intersectionState);
+
+                    logindent = logindent.slice(0, logindent.length - 2);
+
+                    console.log(logindent + `${getTypeNameForErrorDisplay(source)} <-> ${getTypeNameForErrorDisplay(target)} result: ${related}`);
 
                     if (related) {
                         intermediateResult = related;
@@ -31877,7 +31889,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             }
 
             propType = isThisPropertyAccessInConstructor(node, prop) ? autoType
-                : isOneOfObjectType(leftType) ? getDeferredIndexedAccessType(leftType, createLiteralType(TypeFlags.StringLiteral, symbolName(prop)), AccessFlags.None, /*aliasSymbol*/ undefined, /*aliasTypeArguments*/ undefined)
+                : isOneOfObjectType(leftType) ? getDeferredIndexedAccessType(leftType, getStringLiteralType(symbolName(prop)), AccessFlags.None, /*aliasSymbol*/ undefined, /*aliasTypeArguments*/ undefined)
                 : writeOnly || isWriteOnlyAccess(node) ? getWriteTypeOfSymbol(prop)
                 : getTypeOfSymbol(prop);
         }
