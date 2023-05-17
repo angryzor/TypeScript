@@ -334,7 +334,7 @@ export namespace tracingEnabled {
                 destructuringPattern: getLocation(type.pattern),
                 firstDeclaration: getLocation(symbol?.declarations?.[0]),
                 flags: Debug.formatTypeFlags(type.flags).split("|"),
-                freeOneOfs: Object.fromEntries([...type.freeOneOfs ?? []].map(([k, v]) => [k.id, v])),
+                freeOneOfs: [...type.freeOneOfs ?? []].map(oneOf => oneOf.id),
                 display,
             };
 

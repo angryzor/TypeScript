@@ -8,9 +8,9 @@ import {
     addSyntheticLeadingComment,
     AliasDeclarationNode,
     AllAccessorDeclarations,
+    AllOfType,
     AmbientModuleDeclaration,
     and,
-    AllOfType,
     AnonymousType,
     AnyImportOrReExport,
     AnyImportSyntax,
@@ -206,7 +206,6 @@ import {
     FlowStart,
     FlowSwitchClause,
     FlowType,
-    FreeOneOfFlags,
     forEach,
     forEachChild,
     forEachChildRecursively,
@@ -21175,9 +21174,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
 
         function generateOneOfTypeMappers(type: Type, existingMapper?: TypeMapper): (TypeMapper | undefined)[] {
             // We only keep oneOfs that haven't been bound earlier.
-            const oneOfs = [...getFreeOneOfsOfType(type)]
-                .filter(([oneOf, flags]) => flags === FreeOneOfFlags.Node && (!existingMapper || getMappedType(oneOf, existingMapper) === oneOf))
-                .map(([oneOf]) => oneOf);
+            const oneOfs = [...getFreeOneOfsOfType(type)].filter(oneOf => !existingMapper || getMappedType(oneOf, existingMapper) === oneOf);
 
             if (oneOfs.length === 0) {
                 return [undefined];
@@ -21202,7 +21199,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             for (const sourceMapper of sourceMappers) {
                 sourceOneOfTypeMapper = sourceParentMapper ? mergeTypeMappers(sourceMapper, sourceParentMapper) : sourceMapper;
 
-                if (sourceMappers.length !== 0) {
+                if (sourceMapper) {
                     console.log(logindent + "mapping source", (sourceMapper as Extract<TypeMapper, { kind: TypeMapKind.Array }> | undefined)?.sources.map((oneOf, i) => `${getTypeNameForErrorDisplay(oneOf)} -> ${getTypeNameForErrorDisplay((sourceMapper as Extract<TypeMapper, { kind: TypeMapKind.Array }>).targets![i])}`).join("; "));
                 }
 
@@ -21213,7 +21210,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                     // Only keep the last error.
                     resetErrorInfo(saveErrorInfo);
 
-                    if (targetMappers.length !== 0) {
+                    if (targetMapper) {
                         console.log(logindent + "mapping target", (targetMapper as Extract<TypeMapper, { kind: TypeMapKind.Array }> | undefined)?.sources.map((oneOf, i) => `${getTypeNameForErrorDisplay(oneOf)} -> ${getTypeNameForErrorDisplay((targetMapper as Extract<TypeMapper, { kind: TypeMapKind.Array }>).targets![i])}`).join("; "));
                     }
 
@@ -25987,11 +25984,11 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
 
     function getFreeOneOfsOfType(type: Type) {
         if (!type.freeOneOfs) {
-            type.freeOneOfs = new Map<OneOfType, FreeOneOfFlags>();
+            type.freeOneOfs = new Set<OneOfType>();
 
             // TypeFlags.AllOf intentionally left out to reset closure
             if (type.flags & TypeFlags.OneOf) {
-                type.freeOneOfs.set(type as OneOfType, FreeOneOfFlags.Node);
+                type.freeOneOfs.add(type as OneOfType);
 
                 addChildOneOfs(type, (type as OneOfType).origin);
             }
@@ -26005,7 +26002,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 const iat = type as IndexedAccessType;
 
                 if (iat.objectType.flags & TypeFlags.OneOf) {
-                    type.freeOneOfs.set(iat.objectType as OneOfType, FreeOneOfFlags.Node);
+                    type.freeOneOfs.add(iat.objectType as OneOfType);
                 }
                 else {
                     addChildOneOfs(type, iat.objectType);
@@ -26031,15 +26028,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
 
         // Add all oneOfs the child has registered.
         for (const oneOfType of getFreeOneOfsOfType(child).keys()) {
-            // If this oneOf type was already in our map of free oneOfs then this type refers to it multiple times
-            // and becomes a "node". Otherwise we just mark that it contains the oneOf type so types higher up the
-            // tree can potentially become nodes.
-            if (freeOneOfs.has(oneOfType)) {
-                freeOneOfs.set(oneOfType, FreeOneOfFlags.Node);
-            }
-            else {
-                freeOneOfs.set(oneOfType, FreeOneOfFlags.Contains);
-            }
+            freeOneOfs.add(oneOfType);
         }
     }
 
@@ -26076,10 +26065,6 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         //     getFreeOneOfsOfType(child).forEach(oneOf => type.freeOneOfs?.add(oneOf));
         // }
     }
-
-    // function getFreeOneOfsForSignature(signature: Signature) {
-
-    // }
 
     function getTypeWithDefault(type: Type, defaultExpression: Expression) {
         return defaultExpression ?
