@@ -13542,7 +13542,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         // if (!type.resolvedProperties) {
         //     const unionProps = getPropertiesOfUnionOrIntersectionType(type.origin);
 
-        //     type.resolvedProperties = unionProps.map(prop => createSymbolWithType(prop, getDeferredIndexedAccessType(type, createLiteralType(TypeFlags.StringLiteral, symbolName(prop)))));
+        //     type.resolvedProperties = unionProps.map(prop => createSymbolWithType(prop, getDeferredPropAccess(type, prop)));
         // }
         // return type.resolvedProperties;
         return getPropertiesOfUnionOrIntersectionType(type.origin);
@@ -17766,6 +17766,10 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         return type;
     }
 
+    function getDeferredPropAccess(type: Type, prop: Symbol) {
+        return getDeferredIndexedAccessType(type, getLiteralTypeFromProperty(prop, TypeFlags.StringOrNumberLiteralOrUnique));
+    }
+
     function getIndexedAccessTypeOrUndefined(objectType: Type, indexType: Type, accessFlags = AccessFlags.None, accessNode?: ElementAccessExpression | IndexedAccessTypeNode | PropertyName | BindingName | SyntheticExpression, aliasSymbol?: Symbol, aliasTypeArguments?: readonly Type[]): Type | undefined {
         if (objectType === wildcardType || indexType === wildcardType) {
             return wildcardType;
@@ -17785,7 +17789,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         // for a generic T and a non-generic K, we eagerly resolve T[K] if it originates in an expression. This is to
         // preserve backwards compatibility. For example, an element access 'this["foo"]' has always been resolved
         // eagerly using the constraint type of 'this' at the given location.
-        if (isGenericIndexType(indexType) || isOneOfObjectType(objectType) || (accessNode && accessNode.kind !== SyntaxKind.IndexedAccessType ?
+        if (isGenericIndexType(indexType) || (accessNode && accessNode.kind !== SyntaxKind.IndexedAccessType ?
             isGenericTupleType(objectType) && !indexTypeLessThan(indexType, objectType.target.fixedLength) :
             isGenericObjectType(objectType) && !(isTupleType(objectType) && indexTypeLessThan(indexType, objectType.target.fixedLength)) || isGenericReducibleType(objectType))) {
             if (objectType.flags & TypeFlags.AnyOrUnknown) {
@@ -17798,6 +17802,10 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         // We treat boolean as different from other unions to improve errors;
         // skipping straight to getPropertyTypeForIndexType gives errors with 'boolean' instead of 'true'.
         const apparentObjectType = getReducedApparentType(objectType);
+        // Also defer indexing when the apparent object type is a oneof type.
+        if (isOneOfObjectType(objectType)) {
+            return getDeferredIndexedAccessType(objectType, indexType, accessFlags, aliasSymbol, aliasTypeArguments);
+        }
         if (indexType.flags & TypeFlags.Union && !(indexType.flags & TypeFlags.Boolean)) {
             const propTypes: Type[] = [];
             let wasMissingProp = false;
@@ -31874,7 +31882,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             }
 
             propType = isThisPropertyAccessInConstructor(node, prop) ? autoType
-                : isOneOfObjectType(leftType) ? getDeferredIndexedAccessType(leftType, getStringLiteralType(symbolName(prop)), AccessFlags.None, /*aliasSymbol*/ undefined, /*aliasTypeArguments*/ undefined)
+                : isOneOfObjectType(leftType) ? getDeferredPropAccess(leftType, prop)
                 : writeOnly || isWriteOnlyAccess(node) ? getWriteTypeOfSymbol(prop)
                 : getTypeOfSymbol(prop);
         }
