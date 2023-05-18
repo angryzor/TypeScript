@@ -16971,7 +16971,11 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
     }
 
     function getAllOfType(origin: Type) {
-        return origin.flags & TypeFlags.OneOf ? (origin as OneOfType).origin : createAllOfType(origin);
+        const freeOneOfs = getFreeOneOfsOfType(origin);
+
+        return origin.flags & TypeFlags.OneOf ? (origin as OneOfType).origin
+            : freeOneOfs.size === 0 && !couldContainTypeVariables(origin) ? origin
+            : createAllOfType(origin);
     }
 
     function createOneOfType(origin: UnionType) {
@@ -16985,7 +16989,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         const mapped = mapType(origin, type => type.flags & TypeFlags.OneOf ? (type as OneOfType).origin : type);
 
         // Don't pack unary types. Their type is definite.
-        return mapped.flags & TypeFlags.Union ? createOneOfType(mapped as UnionType) : mapped;
+        return mapped.flags & (TypeFlags.Union | TypeFlags.InstantiableNonPrimitive) ? createOneOfType(mapped as UnionType) : mapped;
     }
 
     function createIndexType(type: InstantiableType | UnionOrIntersectionType, indexFlags: IndexFlags) {
@@ -20812,6 +20816,13 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                     return Ternary.False;
                 }
 
+                if (source.flags & TypeFlags.AllOf) {
+                    return isRelatedTo((source as AllOfType).origin, target, RecursionFlags.None, reportErrors, /*headMessage*/ undefined, intersectionState);
+                }
+                if (target.flags & TypeFlags.AllOf) {
+                    return isRelatedTo(source, (target as AllOfType).origin, RecursionFlags.None, reportErrors, /*headMessage*/ undefined, intersectionState);
+                }
+
                 traceUnionsOrIntersectionsTooLarge(source, target);
 
                 const skipCaching = source.flags & TypeFlags.Union && (source as UnionType).types.length < 4 && !(target.flags & TypeFlags.Union) ||
@@ -21521,12 +21532,6 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                     getMappedType((target as IndexedAccessType).objectType, targetOneOfTypeMapper!),
                     (target as IndexedAccessType).indexType,
                 ), RecursionFlags.None, reportErrors, /*headMessage*/ undefined, intersectionState);
-            }
-            if (source.flags & TypeFlags.AllOf) {
-                return isRelatedTo((source as AllOfType).origin, target, RecursionFlags.None, reportErrors, /*headMessage*/ undefined, intersectionState);
-            }
-            if (target.flags & TypeFlags.AllOf) {
-                return isRelatedTo(source, (target as AllOfType).origin, RecursionFlags.None, reportErrors, /*headMessage*/ undefined, intersectionState);
             }
 
             if (relation === identityRelation) {
