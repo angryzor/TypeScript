@@ -20604,7 +20604,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             let generalizedSource = source;
             let generalizedSourceType = sourceType;
 
-            if (isLiteralType(source) && !typeCouldHaveTopLevelSingletonTypes(target)) {
+            if (isLiteralType(source) && !typeCouldHaveTopLevelSingletonTypes(target) && !(target.flags & TypeFlags.OneOf)) {
                 generalizedSource = getBaseTypeOfLiteralType(source);
                 Debug.assert(!isTypeAssignableTo(generalizedSource, target), "generalized source shouldn't be assignable");
                 generalizedSourceType = getTypeNameForErrorDisplay(generalizedSource);
@@ -21230,8 +21230,6 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
 
                     logindent = logindent.slice(0, logindent.length - 2);
 
-                    console.log(logindent + `${getTypeNameForErrorDisplay(source)} <-> ${getTypeNameForErrorDisplay(target)} result: ${related}`);
-
                     if (related) {
                         intermediateResult = related;
                         break;
@@ -21253,6 +21251,8 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
 
             sourceOneOfTypeMapper = sourceParentMapper;
             targetOneOfTypeMapper = targetParentMapper;
+
+            console.log(logindent + `${getTypeNameForErrorDisplay(source)} <-> ${getTypeNameForErrorDisplay(target)} result: ${result}`);
 
             return result;
         }
@@ -21521,6 +21521,12 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                     getMappedType((target as IndexedAccessType).objectType, targetOneOfTypeMapper!),
                     (target as IndexedAccessType).indexType,
                 ), RecursionFlags.None, reportErrors, /*headMessage*/ undefined, intersectionState);
+            }
+            if (source.flags & TypeFlags.AllOf) {
+                return isRelatedTo((source as AllOfType).origin, target, RecursionFlags.None, reportErrors, /*headMessage*/ undefined, intersectionState);
+            }
+            if (target.flags & TypeFlags.AllOf) {
+                return isRelatedTo(source, (target as AllOfType).origin, RecursionFlags.None, reportErrors, /*headMessage*/ undefined, intersectionState);
             }
 
             if (relation === identityRelation) {
@@ -23084,6 +23090,17 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         }
     }
 
+    function getRelationKeyTypeMapperSuffix(mapper: TypeMapper): string {
+        switch (mapper.kind) {
+            case TypeMapKind.Array:
+                return mapper.sources.map((oneOf, i) => `${oneOf.id}=${mapper.targets![i].id}`).join(",");
+            case TypeMapKind.Merged:
+                return `${getRelationKeyTypeMapperSuffix(mapper.mapper1)},${getRelationKeyTypeMapperSuffix(mapper.mapper2)}`;
+            default:
+                throw new Error("unsupported mapper type for relation key");
+        }
+    }
+
     /**
      * To improve caching, the relation key for two generic types uses the target's id plus ids of the type parameters.
      * For other cases, the types ids are used.
@@ -23097,9 +23114,9 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         const postFix = `${
             intersectionState ? ":" + intersectionState : ""
         }|${
-            sourceOneOfTypeMapper && sourceOneOfTypeMapper.kind === TypeMapKind.Array && sourceOneOfTypeMapper.sources.map((oneOf, i) => `${oneOf.id}=${sourceOneOfTypeMapper.targets![i].id}`).join(",")
+            sourceOneOfTypeMapper && getRelationKeyTypeMapperSuffix(sourceOneOfTypeMapper)
         }|${
-            targetOneOfTypeMapper && targetOneOfTypeMapper.kind === TypeMapKind.Array && targetOneOfTypeMapper.sources.map((oneOf, i) => `${oneOf.id}=${targetOneOfTypeMapper.targets![i].id}`).join(",")
+            targetOneOfTypeMapper && getRelationKeyTypeMapperSuffix(targetOneOfTypeMapper)
         }`;
         return isTypeReferenceWithGenericArguments(source) && isTypeReferenceWithGenericArguments(target) ?
             getGenericTypeReferenceRelationKey(source as TypeReference, target as TypeReference, postFix, ignoreConstraints) :
@@ -24229,7 +24246,8 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 objectFlags & ObjectFlags.Reference && ((type as TypeReference).node || some(getTypeArguments(type as TypeReference), couldContainTypeVariables)) ||
                 objectFlags & ObjectFlags.Anonymous && type.symbol && type.symbol.flags & (SymbolFlags.Function | SymbolFlags.Method | SymbolFlags.Class | SymbolFlags.TypeLiteral | SymbolFlags.ObjectLiteral) && type.symbol.declarations ||
                 objectFlags & (ObjectFlags.Mapped | ObjectFlags.ReverseMapped | ObjectFlags.ObjectRestType | ObjectFlags.InstantiationExpressionType)) ||
-            type.flags & (TypeFlags.UnionOrIntersection | TypeFlags.TemplateLiteral) && !(type.flags & TypeFlags.EnumLiteral) && !isNonGenericTopLevelType(type) && some((type as UnionOrIntersectionType | TemplateLiteralType).types, couldContainTypeVariables));
+            type.flags & (TypeFlags.UnionOrIntersection | TypeFlags.TemplateLiteral) && !(type.flags & TypeFlags.EnumLiteral) && !isNonGenericTopLevelType(type) && some((type as UnionOrIntersectionType | TemplateLiteralType).types, couldContainTypeVariables) ||
+            type.flags & (TypeFlags.OneOf | TypeFlags.AllOf) && couldContainTypeVariables((type as OneOfType | AllOfType).origin));
         if (type.flags & TypeFlags.ObjectFlagsType) {
             (type as ObjectFlagsType).objectFlags |= ObjectFlags.CouldContainTypeVariablesComputed | (result ? ObjectFlags.CouldContainTypeVariables : 0);
         }
