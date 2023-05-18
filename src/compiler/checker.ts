@@ -20398,7 +20398,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         let incompatibleStack: DiagnosticAndArguments[] | undefined;
         let sourceOneOfTypeMapper: TypeMapper | undefined;
         let targetOneOfTypeMapper: TypeMapper | undefined;
-        let logindent = "";
+        // let logindent = "";
 
         Debug.assert(relation !== identityRelation || !errorNode, "no error reporting in identity checking");
 
@@ -21212,15 +21212,15 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             const sourceMappers = generateOneOfTypeMappers(source, sourceParentMapper);
             const targetMappers = generateOneOfTypeMappers(target, targetParentMapper);
 
-            console.log(logindent + `${getTypeNameForErrorDisplay(source)} <-> ${getTypeNameForErrorDisplay(target)}`);
+            // console.log(logindent + `${getTypeNameForErrorDisplay(source)} <-> ${getTypeNameForErrorDisplay(target)}`);
 
             let result = Ternary.True;
             for (const sourceMapper of sourceMappers) {
                 sourceOneOfTypeMapper = sourceParentMapper ? mergeTypeMappers(sourceMapper, sourceParentMapper) : sourceMapper;
 
-                if (sourceMapper) {
-                    console.log(logindent + "mapping source", (sourceMapper as Extract<TypeMapper, { kind: TypeMapKind.Array }> | undefined)?.sources.map((oneOf, i) => `${getTypeNameForErrorDisplay(oneOf)} -> ${getTypeNameForErrorDisplay((sourceMapper as Extract<TypeMapper, { kind: TypeMapKind.Array }>).targets![i])}`).join("; "));
-                }
+                // if (sourceMapper) {
+                //     console.log(logindent + "mapping source", (sourceMapper as Extract<TypeMapper, { kind: TypeMapKind.Array }> | undefined)?.sources.map((oneOf, i) => `${getTypeNameForErrorDisplay(oneOf)} -> ${getTypeNameForErrorDisplay((sourceMapper as Extract<TypeMapper, { kind: TypeMapKind.Array }>).targets![i])}`).join("; "));
+                // }
 
                 const saveErrorInfo = captureErrorCalculationState();
                 let intermediateResult = Ternary.False;
@@ -21229,17 +21229,17 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                     // Only keep the last error.
                     resetErrorInfo(saveErrorInfo);
 
-                    if (targetMapper) {
-                        console.log(logindent + "mapping target", (targetMapper as Extract<TypeMapper, { kind: TypeMapKind.Array }> | undefined)?.sources.map((oneOf, i) => `${getTypeNameForErrorDisplay(oneOf)} -> ${getTypeNameForErrorDisplay((targetMapper as Extract<TypeMapper, { kind: TypeMapKind.Array }>).targets![i])}`).join("; "));
-                    }
+                    // if (targetMapper) {
+                    //     console.log(logindent + "mapping target", (targetMapper as Extract<TypeMapper, { kind: TypeMapKind.Array }> | undefined)?.sources.map((oneOf, i) => `${getTypeNameForErrorDisplay(oneOf)} -> ${getTypeNameForErrorDisplay((targetMapper as Extract<TypeMapper, { kind: TypeMapKind.Array }>).targets![i])}`).join("; "));
+                    // }
 
-                    logindent += "  ";
+                    // logindent += " ";
 
                     targetOneOfTypeMapper = targetParentMapper ? mergeTypeMappers(targetMapper, targetParentMapper) : targetMapper;
 
                     const related = isOneRelatedTo(source, target, recursionFlags, reportErrors, headMessage, intersectionState);
 
-                    logindent = logindent.slice(0, logindent.length - 2);
+                    // logindent = logindent.slice(0, logindent.length - 2);
 
                     if (related) {
                         intermediateResult = related;
@@ -21263,7 +21263,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             sourceOneOfTypeMapper = sourceParentMapper;
             targetOneOfTypeMapper = targetParentMapper;
 
-            console.log(logindent + `${getTypeNameForErrorDisplay(source)} <-> ${getTypeNameForErrorDisplay(target)} result: ${result}`);
+            // console.log(logindent + `${getTypeNameForErrorDisplay(source)} <-> ${getTypeNameForErrorDisplay(target)} result: ${result}`);
 
             return result;
         }
@@ -26014,87 +26014,99 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
     }
 
     function getFreeOneOfsOfType(type: Type) {
-        if (!type.freeOneOfs) {
-            type.freeOneOfs = new Set<OneOfType>();
+        const stack: Type[] = [];
 
-            // TypeFlags.AllOf intentionally left out to reset closure
-            if (type.flags & TypeFlags.OneOf) {
-                type.freeOneOfs.add(type as OneOfType);
+        return getFreeOneOfsOfTypeWorker(type);
 
-                addChildOneOfs(type, (type as OneOfType).origin);
-            }
-            else if (type.flags & TypeFlags.UnionOrIntersection) {
-                addChildrenOneOfs(type, (type as UnionType).types);
-            }
-            else if (type.flags & TypeFlags.Object) {
-                calculateFreeOneOfsForObjectType(type as ObjectType);
-            }
-            else if (type.flags & TypeFlags.IndexedAccess) {
-                const iat = type as IndexedAccessType;
+        function getFreeOneOfsOfTypeWorker(type: Type) {
+            if (!type.freeOneOfs) {
+                type.freeOneOfs = new Set<OneOfType>();
 
-                if (iat.objectType.flags & TypeFlags.OneOf) {
-                    type.freeOneOfs.add(iat.objectType as OneOfType);
+                stack.push(type);
+                console.log(stack.length, '-', stack.map(t => t.id).toString(), "-", getTypeNameForErrorDisplay(type));
+                if (!isDeeplyNestedType(type, stack, stack.length, 50)) {
+                    // TypeFlags.AllOf intentionally left out to reset closure
+                    if (type.flags & TypeFlags.OneOf) {
+                        type.freeOneOfs.add(type as OneOfType);
+
+                        addChildOneOfs(type, (type as OneOfType).origin);
+                    }
+                    else if (type.flags & TypeFlags.UnionOrIntersection) {
+                        addChildrenOneOfs(type, (type as UnionType).types);
+                    }
+                    else if (type.flags & TypeFlags.Object) {
+                        calculateFreeOneOfsForObjectType(type as ObjectType);
+                    }
+                    else if (type.flags & TypeFlags.IndexedAccess) {
+                        const iat = type as IndexedAccessType;
+
+                        if (iat.objectType.flags & TypeFlags.OneOf) {
+                            type.freeOneOfs.add(iat.objectType as OneOfType);
+                        }
+                        else {
+                            addChildOneOfs(type, iat.objectType);
+                        }
+                        addChildOneOfs(type, iat.indexType);
+                    }
+                    else if (type.flags & TypeFlags.TypeParameter) {
+                        const tp = type as TypeParameter;
+
+                        if (tp.constraint) {
+                            addChildOneOfs(type, tp.constraint);
+                        }
+                        if (tp.default) {
+                            addChildOneOfs(type, tp.default);
+                        }
+                    }
                 }
-                else {
-                    addChildOneOfs(type, iat.objectType);
-                }
-                addChildOneOfs(type, iat.indexType);
-            } else if (type.flags & TypeFlags.TypeParameter) {
-                const tp = type as TypeParameter;
-
-                if (tp.constraint) {
-                    addChildOneOfs(type, tp.constraint);
-                }
-                if (tp.default) {
-                    addChildOneOfs(type, tp.default);
-                }
+                stack.pop();
             }
-        }
-        return type.freeOneOfs;
-    }
-
-    function addChildOneOfs(type: Type, child: Type) {
-        // This function is only called by `getFreeOneOfsOfType`, which creates the map before calling.
-        const freeOneOfs = type.freeOneOfs!;
-
-        // Add all oneOfs the child has registered.
-        for (const oneOfType of getFreeOneOfsOfType(child).keys()) {
-            freeOneOfs.add(oneOfType);
-        }
-    }
-
-    function addChildrenOneOfs(type: Type, children: readonly Type[]) {
-        for (const child of children) {
-            addChildOneOfs(type, child);
-        }
-    }
-
-    function calculateFreeOneOfsForObjectType(type: ObjectType) {
-        const resolved = resolveStructuredTypeMembers(type);
-
-        addChildrenOneOfs(type, resolved.properties.map(getTypeOfSymbol));
-
-        if (type.objectFlags & ObjectFlags.Reference) {
-            addChildrenOneOfs(type, (type as TypeReference).resolvedTypeArguments ?? []);
+            return type.freeOneOfs;
         }
 
-        // for (const sig of resolved.callSignatures) {
-        //     const child = getDeclaredTypeOfSymbol(sig);
+        function addChildOneOfs(type: Type, child: Type) {
+            // This function is only called by `getFreeOneOfsOfType`, which creates the map before calling.
+            const freeOneOfs = type.freeOneOfs!;
 
-        //     getFreeOneOfsOfType(child).forEach(oneOf => type.freeOneOfs?.add(oneOf));
-        // }
+            // Add all oneOfs the child has registered.
+            for (const oneOfType of getFreeOneOfsOfTypeWorker(child).keys()) {
+                freeOneOfs.add(oneOfType);
+            }
+        }
 
-        // for (const sig of resolved.constructSignatures) {
-        //     const child = getDeclaredTypeOfSymbol(sig);
+        function addChildrenOneOfs(type: Type, children: readonly Type[]) {
+            for (const child of children) {
+                addChildOneOfs(type, child);
+            }
+        }
 
-        //     getFreeOneOfsOfType(child).forEach(oneOf => type.freeOneOfs?.add(oneOf));
-        // }
+        function calculateFreeOneOfsForObjectType(type: ObjectType) {
+            const resolved = resolveStructuredTypeMembers(type);
 
-        // for (const sig of resolved.indexInfos) {
-        //     const child = getDeclaredTypeOfSymbol(sig);
+            addChildrenOneOfs(type, resolved.properties.map(getTypeOfSymbol));
 
-        //     getFreeOneOfsOfType(child).forEach(oneOf => type.freeOneOfs?.add(oneOf));
-        // }
+            if (type.objectFlags & ObjectFlags.Reference) {
+                addChildrenOneOfs(type, (type as TypeReference).resolvedTypeArguments ?? []);
+            }
+
+            // for (const sig of resolved.callSignatures) {
+            //     const child = getDeclaredTypeOfSymbol(sig);
+
+            //     getFreeOneOfsOfType(child).forEach(oneOf => type.freeOneOfs?.add(oneOf));
+            // }
+
+            // for (const sig of resolved.constructSignatures) {
+            //     const child = getDeclaredTypeOfSymbol(sig);
+
+            //     getFreeOneOfsOfType(child).forEach(oneOf => type.freeOneOfs?.add(oneOf));
+            // }
+
+            // for (const sig of resolved.indexInfos) {
+            //     const child = getDeclaredTypeOfSymbol(sig);
+
+            //     getFreeOneOfsOfType(child).forEach(oneOf => type.freeOneOfs?.add(oneOf));
+            // }
+        }
     }
 
     function getTypeWithDefault(type: Type, defaultExpression: Expression) {

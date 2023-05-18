@@ -92,6 +92,7 @@ export class CompilerBaselineRunner extends RunnerBase {
         before(() => {
             let payload;
             if (test && test.content) {
+                console.log(test.file);
                 const rootDir = test.file.indexOf("conformance") === -1 ? "tests/cases/compiler/" : ts.getDirectoryPath(test.file) + "/";
                 payload = TestCaseParser.makeUnitsFromTest(test.content, test.file, rootDir);
             }
