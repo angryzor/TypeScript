@@ -26015,6 +26015,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
 
     function getFreeOneOfsOfType(type: Type) {
         const stack: Type[] = [];
+        const recursionIdentityMap = new Map<object, number>();
 
         return getFreeOneOfsOfTypeWorker(type);
 
@@ -26023,8 +26024,18 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 type.freeOneOfs = new Set<OneOfType>();
 
                 stack.push(type);
-                console.log(stack.length, '-', stack.map(t => t.id).toString(), "-", getTypeNameForErrorDisplay(type));
-                if (!isDeeplyNestedType(type, stack, stack.length, 50)) {
+
+                let recursionToken: number | undefined;
+                const recursionIdentity = getRecursionIdentity(type);
+                if (recursionIdentity) {
+                    recursionToken = recursionIdentityMap.get(recursionIdentity);
+                    if (!recursionToken) {
+                        recursionToken = recursionIdentityMap.size;
+                        recursionIdentityMap.set(recursionIdentity, recursionToken);
+                    }
+                }
+                console.log("START: ", stack.length, "-", type.id, "-", recursionToken, "-", getTypeNameForErrorDisplay(type));
+                if (!isDeeplyNestedType(type, stack, stack.length)) {
                     // TypeFlags.AllOf intentionally left out to reset closure
                     if (type.flags & TypeFlags.OneOf) {
                         type.freeOneOfs.add(type as OneOfType);
@@ -26040,12 +26051,15 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                     else if (type.flags & TypeFlags.IndexedAccess) {
                         const iat = type as IndexedAccessType;
 
+                        console.log("IAT object");
                         if (iat.objectType.flags & TypeFlags.OneOf) {
                             type.freeOneOfs.add(iat.objectType as OneOfType);
                         }
                         else {
                             addChildOneOfs(type, iat.objectType);
                         }
+
+                        console.log("IAT index");
                         addChildOneOfs(type, iat.indexType);
                     }
                     else if (type.flags & TypeFlags.TypeParameter) {
@@ -26059,6 +26073,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                         }
                     }
                 }
+                console.log("END  : ", stack.length, "-", type.id, "-", recursionToken, "-", getTypeNameForErrorDisplay(type));
                 stack.pop();
             }
             return type.freeOneOfs;
@@ -26083,9 +26098,11 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         function calculateFreeOneOfsForObjectType(type: ObjectType) {
             const resolved = resolveStructuredTypeMembers(type);
 
+            console.log("OBJ props -", resolved.properties.map(symbolName).join(', '));
             addChildrenOneOfs(type, resolved.properties.map(getTypeOfSymbol));
 
             if (type.objectFlags & ObjectFlags.Reference) {
+                console.log("OBJ REF");
                 addChildrenOneOfs(type, (type as TypeReference).resolvedTypeArguments ?? []);
             }
 
