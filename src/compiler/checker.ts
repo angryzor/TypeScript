@@ -23239,6 +23239,9 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 // exclude the static side of classes from this check since it shares its symbol with the instance side.
                 return type.symbol;
             }
+            if (getObjectFlags(type) & ObjectFlags.ReverseMapped) {
+                return getRecursionIdentity((type as ReverseMappedType).mappedType);
+            }
             if (isTupleType(type)) {
                 return type.target;
             }
@@ -26015,7 +26018,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
 
     function getFreeOneOfsOfType(type: Type) {
         const stack: Type[] = [];
-        const recursionIdentityMap = new Map<object, number>();
+        // const recursionIdentityMap = new Map<object, number>();
 
         return getFreeOneOfsOfTypeWorker(type);
 
@@ -26023,19 +26026,24 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             if (!type.freeOneOfs) {
                 type.freeOneOfs = new Set<OneOfType>();
 
+                // let recursionToken: number | undefined;
+                // const recursionIdentity = getRecursionIdentity(type);
+                // if (recursionIdentity) {
+                //     recursionToken = recursionIdentityMap.get(recursionIdentity);
+                //     if (!recursionToken) {
+                //         recursionToken = recursionIdentityMap.size;
+                //         recursionIdentityMap.set(recursionIdentity, recursionToken);
+                //     }
+                // }
+
+                // console.log("START: ", stack.length, "-", type.id, "-", recursionToken, "-", type.symbol && symbolName(type.symbol), "-", type.aliasSymbol && symbolName(type.aliasSymbol), "-", getTypeNameForErrorDisplay(type), "-", typeToString(type));
                 stack.push(type);
 
-                let recursionToken: number | undefined;
-                const recursionIdentity = getRecursionIdentity(type);
-                if (recursionIdentity) {
-                    recursionToken = recursionIdentityMap.get(recursionIdentity);
-                    if (!recursionToken) {
-                        recursionToken = recursionIdentityMap.size;
-                        recursionIdentityMap.set(recursionIdentity, recursionToken);
-                    }
-                }
-                console.log("START: ", stack.length, "-", type.id, "-", recursionToken, "-", getTypeNameForErrorDisplay(type));
                 if (!isDeeplyNestedType(type, stack, stack.length)) {
+                    // if (stack.length > 50) {
+                    //     debugger;
+                    // }
+
                     // TypeFlags.AllOf intentionally left out to reset closure
                     if (type.flags & TypeFlags.OneOf) {
                         type.freeOneOfs.add(type as OneOfType);
@@ -26051,7 +26059,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                     else if (type.flags & TypeFlags.IndexedAccess) {
                         const iat = type as IndexedAccessType;
 
-                        console.log("IAT object");
+                        // console.log("IAT object");
                         if (iat.objectType.flags & TypeFlags.OneOf) {
                             type.freeOneOfs.add(iat.objectType as OneOfType);
                         }
@@ -26059,7 +26067,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                             addChildOneOfs(type, iat.objectType);
                         }
 
-                        console.log("IAT index");
+                        // console.log("IAT index");
                         addChildOneOfs(type, iat.indexType);
                     }
                     else if (type.flags & TypeFlags.TypeParameter) {
@@ -26073,8 +26081,8 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                         }
                     }
                 }
-                console.log("END  : ", stack.length, "-", type.id, "-", recursionToken, "-", getTypeNameForErrorDisplay(type));
                 stack.pop();
+                // console.log("END  : ", stack.length, "-", type.id, "-", recursionToken, "-", type.symbol && symbolName(type.symbol), "-", type.aliasSymbol && symbolName(type.aliasSymbol), "-", getTypeNameForErrorDisplay(type), "-", typeToString(type));
             }
             return type.freeOneOfs;
         }
@@ -26098,11 +26106,11 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         function calculateFreeOneOfsForObjectType(type: ObjectType) {
             const resolved = resolveStructuredTypeMembers(type);
 
-            console.log("OBJ props -", resolved.properties.map(symbolName).join(', '));
+            // console.log("OBJ props -", resolved.properties.map(symbolName).join(', '));
             addChildrenOneOfs(type, resolved.properties.map(getTypeOfSymbol));
 
             if (type.objectFlags & ObjectFlags.Reference) {
-                console.log("OBJ REF");
+                // console.log("OBJ REF");
                 addChildrenOneOfs(type, (type as TypeReference).resolvedTypeArguments ?? []);
             }
 
