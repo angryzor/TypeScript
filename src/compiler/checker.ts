@@ -20402,7 +20402,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
 
         Debug.assert(relation !== identityRelation || !errorNode, "no error reporting in identity checking");
 
-        const result = isRelatedTo(source, target, RecursionFlags.Both, /*reportErrors*/ !!errorNode, headMessage);
+        const result = isRelatedToOneOf(source, target, RecursionFlags.Both, /*reportErrors*/ !!errorNode, headMessage);
         if (incompatibleStack) {
             reportIncompatibleStack();
         }
@@ -20727,7 +20727,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
          * * Ternary.Maybe if they are related with assumptions of other relationships, or
          * * Ternary.False if they are not related.
          */
-        function isOneRelatedTo(originalSource: Type, originalTarget: Type, recursionFlags: RecursionFlags = RecursionFlags.Both, reportErrors = false, headMessage?: DiagnosticMessage, intersectionState = IntersectionState.None): Ternary {
+        function isRelatedTo(originalSource: Type, originalTarget: Type, recursionFlags: RecursionFlags = RecursionFlags.Both, reportErrors = false, headMessage?: DiagnosticMessage, intersectionState = IntersectionState.None): Ternary {
             // Before normalization: if `source` is type an object type, and `target` is primitive,
             // skip all the checks we don't need and just return `isSimpleTypeRelatedTo` result
             if (originalSource.flags & TypeFlags.Object && originalTarget.flags & TypeFlags.Primitive) {
@@ -20817,10 +20817,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 }
 
                 if (source.flags & TypeFlags.AllOf) {
-                    return isRelatedTo((source as AllOfType).origin, target, RecursionFlags.None, reportErrors, /*headMessage*/ undefined, intersectionState);
-                }
-                if (target.flags & TypeFlags.AllOf) {
-                    return isRelatedTo(source, (target as AllOfType).origin, RecursionFlags.None, reportErrors, /*headMessage*/ undefined, intersectionState);
+                    return isRelatedToOneOf((source as AllOfType).origin, target, RecursionFlags.None, reportErrors, /*headMessage*/ undefined, intersectionState);
                 }
 
                 traceUnionsOrIntersectionsTooLarge(source, target);
@@ -21205,7 +21202,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             }
         }
 
-        function isRelatedTo(source: Type, target: Type, recursionFlags?: RecursionFlags, reportErrors?: boolean, headMessage?: DiagnosticMessage, intersectionState?: IntersectionState) {
+        function isRelatedToOneOf(source: Type, target: Type, recursionFlags?: RecursionFlags, reportErrors?: boolean, headMessage?: DiagnosticMessage, intersectionState?: IntersectionState) {
             const sourceParentMapper = sourceOneOfTypeMapper;
             const targetParentMapper = targetOneOfTypeMapper;
 
@@ -21237,7 +21234,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
 
                     targetOneOfTypeMapper = targetParentMapper ? mergeTypeMappers(targetMapper, targetParentMapper) : targetMapper;
 
-                    const related = isOneRelatedTo(source, target, recursionFlags, reportErrors, headMessage, intersectionState);
+                    const related = isRelatedTo(source, target, recursionFlags, reportErrors, headMessage, intersectionState);
 
                     // logindent = logindent.slice(0, logindent.length - 2);
 
@@ -21515,6 +21512,9 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             let sourceFlags = source.flags;
             const targetFlags = target.flags;
 
+            if (target.flags & TypeFlags.AllOf) {
+                return isRelatedToOneOf(source, (target as AllOfType).origin, RecursionFlags.None, reportErrors, /*headMessage*/ undefined, intersectionState);
+            }
             if (source.flags & TypeFlags.OneOf) {
                 return isRelatedTo(getMappedType(source, sourceOneOfTypeMapper!), target, RecursionFlags.None, reportErrors, /*headMessage*/ undefined, intersectionState);
             }
