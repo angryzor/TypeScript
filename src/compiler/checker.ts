@@ -20413,7 +20413,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
 
         Debug.assert(relation !== identityRelation || !errorNode, "no error reporting in identity checking");
 
-        const result = isRelatedToOneOf(source, target, RecursionFlags.Both, /*reportErrors*/ !!errorNode, headMessage);
+        const result = isRelatedTo(source, target, RecursionFlags.Both, /*reportErrors*/ !!errorNode, headMessage);
         if (incompatibleStack) {
             reportIncompatibleStack();
         }
@@ -21209,7 +21209,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             }
         }
 
-        function isRelatedToOneOf(source: Type, target: Type, recursionFlags?: RecursionFlags, reportErrors?: boolean, headMessage?: DiagnosticMessage, intersectionState?: IntersectionState) {
+        function isRelatedToOneOf(source: Type, target: Type, reportErrors: boolean, intersectionState: IntersectionState) {
             const sourceParentMapper = sourceOneOfTypeMapper;
             const targetParentMapper = targetOneOfTypeMapper;
 
@@ -21241,7 +21241,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
 
                     targetOneOfTypeMapper = targetParentMapper ? mergeTypeMappers(targetMapper, targetParentMapper) : targetMapper;
 
-                    const related = isRelatedTo(source, target, recursionFlags, reportErrors, headMessage, intersectionState);
+                    const related = structuredTypeRelatedTo(source, target, reportErrors, intersectionState);
 
                     // logindent = logindent.slice(0, logindent.length - 2);
 
@@ -21418,7 +21418,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             }
             else {
                 tracing?.push(tracing.Phase.CheckTypes, "structuredTypeRelatedTo", { sourceId: source.id, targetId: target.id });
-                result = structuredTypeRelatedTo(source, target, reportErrors, intersectionState);
+                result = isRelatedToOneOf(source, target, reportErrors, intersectionState);
                 tracing?.pop();
             }
 
@@ -21520,10 +21520,10 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             const targetFlags = target.flags;
 
             if (source.flags & TypeFlags.AllOf) {
-                return isRelatedToOneOf((source as AllOfType).origin, target, RecursionFlags.None, reportErrors, /*headMessage*/ undefined, intersectionState);
+                return isRelatedTo((source as AllOfType).origin, target, RecursionFlags.None, reportErrors, /*headMessage*/ undefined, intersectionState);
             }
             if (target.flags & TypeFlags.AllOf) {
-                return isRelatedToOneOf(source, (target as AllOfType).origin, RecursionFlags.None, reportErrors, /*headMessage*/ undefined, intersectionState);
+                return isRelatedTo(source, (target as AllOfType).origin, RecursionFlags.None, reportErrors, /*headMessage*/ undefined, intersectionState);
             }
             if (source.flags & TypeFlags.OneOf) {
                 return isRelatedTo(getMappedType(source, sourceOneOfTypeMapper!), target, RecursionFlags.None, reportErrors, /*headMessage*/ undefined, intersectionState);
