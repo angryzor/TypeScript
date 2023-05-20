@@ -23240,7 +23240,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 return type.symbol;
             }
             if (getObjectFlags(type) & ObjectFlags.ReverseMapped) {
-                return getRecursionIdentity((type as ReverseMappedType).mappedType);
+                return (type as ReverseMappedType).mappedType.symbol;
             }
             if (isTupleType(type)) {
                 return type.target;
@@ -26018,6 +26018,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
 
     function getFreeOneOfsOfType(type: Type) {
         const stack: Type[] = [];
+
         // const recursionIdentityMap = new Map<object, number>();
 
         return getFreeOneOfsOfTypeWorker(type);
@@ -26050,16 +26051,24 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
 
                         addChildOneOfs(type, (type as OneOfType).origin);
                     }
-                    else if (type.flags & TypeFlags.UnionOrIntersection) {
-                        addChildrenOneOfs(type, (type as UnionType).types);
-                    }
                     else if (type.flags & TypeFlags.Object) {
                         calculateFreeOneOfsForObjectType(type as ObjectType);
+                    }
+                    else if (type.flags & TypeFlags.TypeParameter) {
+                        const tp = type as TypeParameter;
+
+                        addChildOneOfs(type, getConstraintOfTypeParameter(tp));
+                        addChildOneOfs(type, tp.default);
+                    }
+                    else if (type.flags & TypeFlags.UnionOrIntersection) {
+                        forEach((type as UnionType).types, t => addChildOneOfs(type, t));
+                    }
+                    else if (type.flags & TypeFlags.Index) {
+                        addChildOneOfs(type, (type as IndexType).type);
                     }
                     else if (type.flags & TypeFlags.IndexedAccess) {
                         const iat = type as IndexedAccessType;
 
-                        // console.log("IAT object");
                         if (iat.objectType.flags & TypeFlags.OneOf) {
                             type.freeOneOfs.add(iat.objectType as OneOfType);
                         }
@@ -26067,70 +26076,81 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                             addChildOneOfs(type, iat.objectType);
                         }
 
-                        // console.log("IAT index");
                         addChildOneOfs(type, iat.indexType);
-                    }
-                    else if (type.flags & TypeFlags.TypeParameter) {
-                        const tp = type as TypeParameter;
-
-                        if (tp.constraint) {
-                            addChildOneOfs(type, tp.constraint);
-                        }
-                        if (tp.default) {
-                            addChildOneOfs(type, tp.default);
-                        }
+                        addChildOneOfs(type, iat.constraint);
                     }
                 }
                 stack.pop();
-                // console.log("END  : ", stack.length, "-", type.id, "-", recursionToken, "-", type.symbol && symbolName(type.symbol), "-", type.aliasSymbol && symbolName(type.aliasSymbol), "-", getTypeNameForErrorDisplay(type), "-", typeToString(type));
+                // console.log("END : ", stack.length, "-", type.id, "-", recursionToken, "-", type.symbol && symbolName(type.symbol), "-", type.aliasSymbol && symbolName(type.aliasSymbol), "-", getTypeNameForErrorDisplay(type), "-", typeToString(type));
             }
             return type.freeOneOfs;
         }
 
-        function addChildOneOfs(type: Type, child: Type) {
-            // This function is only called by `getFreeOneOfsOfType`, which creates the map before calling.
-            const freeOneOfs = type.freeOneOfs!;
+        function addChildOneOfs(type: Type, child: Type | undefined) {
+            if (!child) {
+                return;
+            }
 
             // Add all oneOfs the child has registered.
-            for (const oneOfType of getFreeOneOfsOfTypeWorker(child).keys()) {
-                freeOneOfs.add(oneOfType);
-            }
-        }
-
-        function addChildrenOneOfs(type: Type, children: readonly Type[]) {
-            for (const child of children) {
-                addChildOneOfs(type, child);
+            for (const oneOfType of getFreeOneOfsOfTypeWorker(child)) {
+                type.freeOneOfs!.add(oneOfType);
             }
         }
 
         function calculateFreeOneOfsForObjectType(type: ObjectType) {
+            if (type.objectFlags & ObjectFlags.Reference) {
+                calculateFreeOneOfsForTypeReference(type as TypeReference);
+            }
+            if (type.objectFlags & ObjectFlags.Mapped) {
+                calculateFreeOneOfsForMappedType(type as MappedType);
+            }
+            // if (type.objectFlags & (ObjectFlags.Class | ObjectFlags.Interface)) {
+            //     calculateFreeOneOfsForInterfaceType(type as InterfaceType);
+            // }
+            // if (type.objectFlags & (ObjectFlags.Tuple | ObjectFlags.Anonymous)) {
+            //     calculateFreeOneOfsForAnonymousObjectType(type);
+            // }
+        }
+
+        function calculateFreeOneOfsForTypeReference(type: TypeReference) {
+            // console.log("OBJ REF");
+            addChildOneOfs(type, type.target);
+            forEach(getTypeArguments(type), t => addChildOneOfs(type, t));
+        }
+
+        function calculateFreeOneOfsForMappedType(type: MappedType) {
+            addChildOneOfs(type, type.typeParameter);
+            addChildOneOfs(type, type.constraintType);
+            addChildOneOfs(type, type.templateType);
+            addChildOneOfs(type, type.modifiersType);
+        }
+
+        function calculateFreeOneOfsForInterfaceType(type: InterfaceType) {
+            calculateFreeOneOfsForAnonymousObjectType(type);
+            forEach(type.typeParameters, t => addChildOneOfs(type, t));
+            forEach(getBaseTypes(type), t => addChildOneOfs(type, t));
+            addChildOneOfs(type, type.thisType);
+        }
+
+        function calculateFreeOneOfsForAnonymousObjectType(type: ObjectType) {
             const resolved = resolveStructuredTypeMembers(type);
 
             // console.log("OBJ props -", resolved.properties.map(symbolName).join(', '));
-            addChildrenOneOfs(type, resolved.properties.map(getTypeOfSymbol));
+            forEach(resolved.properties.map(getTypeOfSymbol), t => addChildOneOfs(type, t));
+            forEach(resolved.callSignatures, calculateFreeOneOfsForSignature);
+            forEach(resolved.constructSignatures, calculateFreeOneOfsForSignature);
+            forEach(resolved.indexInfos, info => {
+                addChildOneOfs(type, info.keyType);
+                addChildOneOfs(type, info.type);
+            });
 
-            if (type.objectFlags & ObjectFlags.Reference) {
-                // console.log("OBJ REF");
-                addChildrenOneOfs(type, (type as TypeReference).resolvedTypeArguments ?? []);
+            function calculateFreeOneOfsForSignature(signature: Signature) {
+                addChildOneOfs(type, getTypePredicateOfSignature(signature)?.type);
+                forEach(signature.typeParameters, t => addChildOneOfs(type, t));
+                forEach(signature.parameters.map(getTypeOfSymbol), t => addChildOneOfs(type, t));
+                addChildOneOfs(type, getRestTypeOfSignature(signature));
+                addChildOneOfs(type, getReturnTypeOfSignature(signature));
             }
-
-            // for (const sig of resolved.callSignatures) {
-            //     const child = getDeclaredTypeOfSymbol(sig);
-
-            //     getFreeOneOfsOfType(child).forEach(oneOf => type.freeOneOfs?.add(oneOf));
-            // }
-
-            // for (const sig of resolved.constructSignatures) {
-            //     const child = getDeclaredTypeOfSymbol(sig);
-
-            //     getFreeOneOfsOfType(child).forEach(oneOf => type.freeOneOfs?.add(oneOf));
-            // }
-
-            // for (const sig of resolved.indexInfos) {
-            //     const child = getDeclaredTypeOfSymbol(sig);
-
-            //     getFreeOneOfsOfType(child).forEach(oneOf => type.freeOneOfs?.add(oneOf));
-            // }
         }
     }
 
