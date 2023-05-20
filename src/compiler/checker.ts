@@ -13074,6 +13074,14 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         setStructuredTypeMembers(type, emptySymbols, callSignatures, constructSignatures, indexInfos);
     }
 
+    function resolveAllOfTypeMembers(type: AllOfType) {
+        const child = type.origin;
+        const callSignatures = getSignaturesOfType(child, SignatureKind.Call);
+        const constructSignatures = getSignaturesOfType(child, SignatureKind.Construct);
+        const indexInfos = getIndexInfosOfType(child);
+        setStructuredTypeMembers(type, emptySymbols, callSignatures, constructSignatures, indexInfos);
+    }
+
     /**
      * Converts an AnonymousType to a ResolvedType.
      */
@@ -13486,6 +13494,9 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             }
             else if (type.flags & TypeFlags.OneOf) {
                 resolveOneOfTypeMembers(type as OneOfType);
+            }
+            else if (type.flags & TypeFlags.AllOf) {
+                resolveAllOfTypeMembers(type as AllOfType);
             }
             else {
                 Debug.fail("Unhandled type " + Debug.formatTypeFlags(type.flags));
@@ -20816,10 +20827,6 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                     return Ternary.False;
                 }
 
-                if (source.flags & TypeFlags.AllOf) {
-                    return isRelatedToOneOf((source as AllOfType).origin, target, RecursionFlags.None, reportErrors, /*headMessage*/ undefined, intersectionState);
-                }
-
                 traceUnionsOrIntersectionsTooLarge(source, target);
 
                 const skipCaching = source.flags & TypeFlags.Union && (source as UnionType).types.length < 4 && !(target.flags & TypeFlags.Union) ||
@@ -21512,6 +21519,9 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             let sourceFlags = source.flags;
             const targetFlags = target.flags;
 
+            if (source.flags & TypeFlags.AllOf) {
+                return isRelatedToOneOf((source as AllOfType).origin, target, RecursionFlags.None, reportErrors, /*headMessage*/ undefined, intersectionState);
+            }
             if (target.flags & TypeFlags.AllOf) {
                 return isRelatedToOneOf(source, (target as AllOfType).origin, RecursionFlags.None, reportErrors, /*headMessage*/ undefined, intersectionState);
             }
@@ -26104,12 +26114,12 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             if (type.objectFlags & ObjectFlags.Mapped) {
                 calculateFreeOneOfsForMappedType(type as MappedType);
             }
-            // if (type.objectFlags & (ObjectFlags.Class | ObjectFlags.Interface)) {
-            //     calculateFreeOneOfsForInterfaceType(type as InterfaceType);
-            // }
-            // if (type.objectFlags & (ObjectFlags.Tuple | ObjectFlags.Anonymous)) {
-            //     calculateFreeOneOfsForAnonymousObjectType(type);
-            // }
+            if (type.objectFlags & (ObjectFlags.Class | ObjectFlags.Interface)) {
+                calculateFreeOneOfsForInterfaceType(type as InterfaceType);
+            }
+            if (type.objectFlags & (ObjectFlags.Tuple | ObjectFlags.Anonymous)) {
+                calculateFreeOneOfsForAnonymousObjectType(type);
+            }
         }
 
         function calculateFreeOneOfsForTypeReference(type: TypeReference) {
