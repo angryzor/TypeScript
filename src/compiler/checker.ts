@@ -26059,22 +26059,22 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                     if (type.flags & TypeFlags.OneOf) {
                         type.freeOneOfs.add(type as OneOfType);
 
-                        addChildOneOfs(type, (type as OneOfType).origin);
+                        addChildOneOfs((type as OneOfType).origin);
                     }
                     else if (type.flags & TypeFlags.Object) {
-                        calculateFreeOneOfsForObjectType(type as ObjectType);
+                        addOneOfsForObjectType(type as ObjectType);
                     }
                     else if (type.flags & TypeFlags.TypeParameter) {
                         const tp = type as TypeParameter;
 
-                        addChildOneOfs(type, getConstraintOfTypeParameter(tp));
-                        addChildOneOfs(type, tp.default);
+                        addChildOneOfs(getConstraintOfTypeParameter(tp));
+                        addChildOneOfs(tp.default);
                     }
                     else if (type.flags & TypeFlags.UnionOrIntersection) {
-                        forEach((type as UnionType).types, t => addChildOneOfs(type, t));
+                        forEach((type as UnionType).types, addChildOneOfs);
                     }
                     else if (type.flags & TypeFlags.Index) {
-                        addChildOneOfs(type, (type as IndexType).type);
+                        addChildOneOfs((type as IndexType).type);
                     }
                     else if (type.flags & TypeFlags.IndexedAccess) {
                         const iat = type as IndexedAccessType;
@@ -26083,83 +26083,89 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                             type.freeOneOfs.add(iat.objectType as OneOfType);
                         }
                         else {
-                            addChildOneOfs(type, iat.objectType);
+                            addChildOneOfs(iat.objectType);
                         }
 
-                        addChildOneOfs(type, iat.indexType);
-                        addChildOneOfs(type, iat.constraint);
+                        addChildOneOfs(iat.indexType);
+                        addChildOneOfs(iat.constraint);
                     }
                 }
                 stack.pop();
                 // console.log("END : ", stack.length, "-", type.id, "-", recursionToken, "-", type.symbol && symbolName(type.symbol), "-", type.aliasSymbol && symbolName(type.aliasSymbol), "-", getTypeNameForErrorDisplay(type), "-", typeToString(type));
             }
             return type.freeOneOfs;
-        }
 
-        function addChildOneOfs(type: Type, child: Type | undefined) {
-            if (!child) {
-                return;
+            function addChildOneOfs(child: Type | undefined) {
+                if (!child) {
+                    return;
+                }
+
+                // Add all oneOfs the child has registered.
+                for (const oneOfType of getFreeOneOfsOfTypeWorker(child)) {
+                    type.freeOneOfs!.add(oneOfType);
+                }
             }
 
-            // Add all oneOfs the child has registered.
-            for (const oneOfType of getFreeOneOfsOfTypeWorker(child)) {
-                type.freeOneOfs!.add(oneOfType);
+            function addOneOfsForObjectType(type: ObjectType) {
+                if (type.objectFlags & ObjectFlags.Reference) {
+                    addOneOfsForTypeReference(type as TypeReference);
+                }
+                if (type.objectFlags & ObjectFlags.Mapped) {
+                    addOneOfsForMappedType(type as MappedType);
+                }
+                if (type.objectFlags & (ObjectFlags.Class | ObjectFlags.Interface)) {
+                    addOneOfsForInterfaceType(type as InterfaceType);
+                }
+                if (type.objectFlags & (ObjectFlags.Tuple | ObjectFlags.Anonymous)) {
+                    addOneOfsForAnonymousObjectType(type as AnonymousType | TupleType);
+                }
             }
-        }
 
-        function calculateFreeOneOfsForObjectType(type: ObjectType) {
-            if (type.objectFlags & ObjectFlags.Reference) {
-                calculateFreeOneOfsForTypeReference(type as TypeReference);
+            function addOneOfsForTypeReference(type: TypeReference) {
+                // console.log("OBJ REF");
+                addChildOneOfs(type.target);
+                forEach(getTypeArguments(type), addChildOneOfs);
             }
-            if (type.objectFlags & ObjectFlags.Mapped) {
-                calculateFreeOneOfsForMappedType(type as MappedType);
+
+            function addOneOfsForMappedType(type: MappedType) {
+                addChildOneOfs(type.typeParameter);
+                addChildOneOfs(type.constraintType);
+                addChildOneOfs(type.templateType);
+                addChildOneOfs(type.modifiersType);
             }
-            if (type.objectFlags & (ObjectFlags.Class | ObjectFlags.Interface)) {
-                calculateFreeOneOfsForInterfaceType(type as InterfaceType);
+
+            function addOneOfsForInterfaceType(type: InterfaceType) {
+                addOneOfsForAnonymousObjectType(type);
+                forEach(type.typeParameters, addChildOneOfs);
+                forEach(getBaseTypes(type), addChildOneOfs);
+                addChildOneOfs(type.thisType);
             }
-            if (type.objectFlags & (ObjectFlags.Tuple | ObjectFlags.Anonymous)) {
-                calculateFreeOneOfsForAnonymousObjectType(type);
+
+            function addOneOfsForAnonymousObjectType(type: AnonymousType | TupleType) {
+                addChildOneOfs(type.target);
+
+                if (type.target) {
+                    return;
+                }
+
+                const symbol = getMergedSymbol(type.symbol);
+                const members = getMembersOfSymbol(symbol);
+
+                forEach([...members.values()].map(getTypeOfSymbol), addChildOneOfs);
+                forEach(getSignaturesOfSymbol(members.get(InternalSymbolName.Call)), addOneOfsForSignature);
+                forEach(getSignaturesOfSymbol(members.get(InternalSymbolName.New)), addOneOfsForSignature);
+                forEach(getIndexInfosOfSymbol(symbol), info => {
+                    addChildOneOfs(info.keyType);
+                    addChildOneOfs(info.type);
+                });
             }
-        }
 
-        function calculateFreeOneOfsForTypeReference(type: TypeReference) {
-            // console.log("OBJ REF");
-            addChildOneOfs(type, type.target);
-            forEach(getTypeArguments(type), t => addChildOneOfs(type, t));
-        }
-
-        function calculateFreeOneOfsForMappedType(type: MappedType) {
-            addChildOneOfs(type, type.typeParameter);
-            addChildOneOfs(type, type.constraintType);
-            addChildOneOfs(type, type.templateType);
-            addChildOneOfs(type, type.modifiersType);
-        }
-
-        function calculateFreeOneOfsForInterfaceType(type: InterfaceType) {
-            calculateFreeOneOfsForAnonymousObjectType(type);
-            forEach(type.typeParameters, t => addChildOneOfs(type, t));
-            forEach(getBaseTypes(type), t => addChildOneOfs(type, t));
-            addChildOneOfs(type, type.thisType);
-        }
-
-        function calculateFreeOneOfsForAnonymousObjectType(type: ObjectType) {
-            const resolved = resolveStructuredTypeMembers(type);
-
-            // console.log("OBJ props -", resolved.properties.map(symbolName).join(', '));
-            forEach(resolved.properties.map(getTypeOfSymbol), t => addChildOneOfs(type, t));
-            forEach(resolved.callSignatures, calculateFreeOneOfsForSignature);
-            forEach(resolved.constructSignatures, calculateFreeOneOfsForSignature);
-            forEach(resolved.indexInfos, info => {
-                addChildOneOfs(type, info.keyType);
-                addChildOneOfs(type, info.type);
-            });
-
-            function calculateFreeOneOfsForSignature(signature: Signature) {
-                addChildOneOfs(type, getTypePredicateOfSignature(signature)?.type);
-                forEach(signature.typeParameters, t => addChildOneOfs(type, t));
-                forEach(signature.parameters.map(getTypeOfSymbol), t => addChildOneOfs(type, t));
-                addChildOneOfs(type, getRestTypeOfSignature(signature));
-                addChildOneOfs(type, getReturnTypeOfSignature(signature));
+            function addOneOfsForSignature(signature: Signature) {
+                addChildOneOfs(getTypePredicateOfSignature(signature)?.type);
+                forEach(signature.typeParameters, addChildOneOfs);
+                forEach(signature.parameters.map(getTypeOfSymbol), addChildOneOfs);
+                addChildOneOfs(getRestTypeOfSignature(signature));
+                addChildOneOfs(getReturnTypeOfSignature(signature));
             }
         }
     }
