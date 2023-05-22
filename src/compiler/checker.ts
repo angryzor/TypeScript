@@ -26122,7 +26122,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             }
 
             function addOneOfsForTypeReference(type: TypeReference) {
-                // console.log("OBJ REF");
+                console.log("OBJ REF");
                 addChildOneOfs(type.target);
                 forEach(getTypeArguments(type), addChildOneOfs);
             }
@@ -26135,29 +26135,36 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             }
 
             function addOneOfsForInterfaceType(type: InterfaceType) {
-                addOneOfsForAnonymousObjectType(type);
-                forEach(type.typeParameters, addChildOneOfs);
-                forEach(getBaseTypes(type), addChildOneOfs);
-                addChildOneOfs(type.thisType);
+
+
+                // for (const member of (declared.members?.values() ?? [])) {
+                //     console.log(Debug.formatSymbol(member));
+                //     console.log(getTypeOfSymbol(member));
+                // }
+
+                // forEach(type.typeParameters, addChildOneOfs);
+                // forEach(getBaseTypes(type), addChildOneOfs);
+                // addChildOneOfs(type.thisType);
             }
 
             function addOneOfsForAnonymousObjectType(type: AnonymousType | TupleType) {
-                addChildOneOfs(type.target);
+                console.log(Debug.formatObjectFlags(type.objectFlags));
+                const resolved = resolveStructuredTypeMembers(type);
+                console.log(resolved.members);
 
-                if (type.target) {
-                    return;
-                }
+                forEach([...resolved.members.values()], member => addChildOneOfs(getTypeOfSymbol(getCheckFlags(member) & CheckFlags.Instantiated ? getSymbolLinks(member).target! : member)));
 
-                const symbol = getMergedSymbol(type.symbol);
-                const members = getMembersOfSymbol(symbol);
+                // const symbol = getMergedSymbol(type.symbol);
+                // console.log(`symbol: ${symbol}`);
+                // const members = getMembersOfSymbol(symbol);
 
-                forEach([...members.values()].map(getTypeOfSymbol), addChildOneOfs);
-                forEach(getSignaturesOfSymbol(members.get(InternalSymbolName.Call)), addOneOfsForSignature);
-                forEach(getSignaturesOfSymbol(members.get(InternalSymbolName.New)), addOneOfsForSignature);
-                forEach(getIndexInfosOfSymbol(symbol), info => {
-                    addChildOneOfs(info.keyType);
-                    addChildOneOfs(info.type);
-                });
+                // forEach([...members.values()].map(getTypeOfSymbol), addChildOneOfs);
+                // forEach(getSignaturesOfSymbol(members.get(InternalSymbolName.Call)), addOneOfsForSignature);
+                // forEach(getSignaturesOfSymbol(members.get(InternalSymbolName.New)), addOneOfsForSignature);
+                // forEach(getIndexInfosOfSymbol(symbol), info => {
+                //     addChildOneOfs(info.keyType);
+                //     addChildOneOfs(info.type);
+                // });
             }
 
             function addOneOfsForSignature(signature: Signature) {
