@@ -20429,7 +20429,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
 
         Debug.assert(relation !== identityRelation || !errorNode, "no error reporting in identity checking");
 
-        const result = isRelatedToOneOf(source, target, RecursionFlags.Both, /*reportErrors*/ !!errorNode, headMessage);
+        const result = isRelatedTo(source, target, RecursionFlags.Both, /*reportErrors*/ !!errorNode, headMessage, IntersectionState.None, /*oneOfRoot*/ true);
         if (incompatibleStack) {
             reportIncompatibleStack();
         }
@@ -20754,7 +20754,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
          * * Ternary.Maybe if they are related with assumptions of other relationships, or
          * * Ternary.False if they are not related.
          */
-        function isRelatedTo(originalSource: Type, originalTarget: Type, recursionFlags: RecursionFlags = RecursionFlags.Both, reportErrors = false, headMessage?: DiagnosticMessage, intersectionState = IntersectionState.None): Ternary {
+        function isRelatedTo(originalSource: Type, originalTarget: Type, recursionFlags: RecursionFlags = RecursionFlags.Both, reportErrors = false, headMessage?: DiagnosticMessage, intersectionState = IntersectionState.None, oneOfRoot = false): Ternary {
             // Before normalization: if `source` is type an object type, and `target` is primitive,
             // skip all the checks we don't need and just return `isSimpleTypeRelatedTo` result
             if (originalSource.flags & TypeFlags.Object && originalTarget.flags & TypeFlags.Primitive) {
@@ -20781,7 +20781,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 if (source.flags !== target.flags) return Ternary.False;
                 if (source.flags & TypeFlags.Singleton) return Ternary.True;
                 traceUnionsOrIntersectionsTooLarge(source, target);
-                return recursiveTypeRelatedTo(source, target, /*reportErrors*/ false, IntersectionState.None, recursionFlags);
+                return recursiveTypeRelatedTo(source, target, /*reportErrors*/ false, IntersectionState.None, recursionFlags, oneOfRoot);
             }
 
             // We fastpath comparing a type parameter to exactly its constraint, as this is _super_ common,
@@ -20849,7 +20849,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                     target.flags & TypeFlags.Union && (target as UnionType).types.length < 4 && !(source.flags & TypeFlags.StructuredOrInstantiable);
                 const result = skipCaching ?
                     unionOrIntersectionRelatedTo(source, target, reportErrors, intersectionState) :
-                    recursiveTypeRelatedTo(source, target, reportErrors, intersectionState, recursionFlags);
+                    recursiveTypeRelatedTo(source, target, reportErrors, intersectionState, recursionFlags, oneOfRoot);
                 if (result) {
                     return result;
                 }
@@ -21242,7 +21242,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             return getOneOfSubstitution(oneOf, targetOneOfTypeMapper, newTargetOneOfs);
         }
 
-        function isRelatedToOneOf(source: Type, target: Type, recursionFlags: RecursionFlags = RecursionFlags.Both, reportErrors = false, headMessage?: DiagnosticMessage, intersectionState = IntersectionState.None): Ternary {
+        function structuredTypeRelatedToOneOf(source: Type, target: Type, reportErrors = false, intersectionState = IntersectionState.None): Ternary {
             const sourceParentMapper = sourceOneOfTypeMapper;
             const targetParentMapper = targetOneOfTypeMapper;
 
@@ -21267,7 +21267,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                     newSourceOneOfs = [];
                     newTargetOneOfs = [];
 
-                    const related = isRelatedTo(source, target, recursionFlags, reportErrors, headMessage, intersectionState);
+                    const related = structuredTypeRelatedTo(source, target, reportErrors, intersectionState);
 
                     sourceMappers = extendOneOfTypeMappers(sourceMappers, newSourceOneOfs);
                     targetMappers = extendOneOfTypeMappers(targetMappers, newTargetOneOfs);
@@ -21363,11 +21363,11 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         // Third, check if both types are part of deeply nested chains of generic type instantiations and if so assume the types are
         // equal and infinitely expanding. Fourth, if we have reached a depth of 100 nested comparisons, assume we have runaway recursion
         // and issue an error. Otherwise, actually compare the structure of the two types.
-        function recursiveTypeRelatedTo(source: Type, target: Type, reportErrors: boolean, intersectionState: IntersectionState, recursionFlags: RecursionFlags): Ternary {
+        function recursiveTypeRelatedTo(source: Type, target: Type, reportErrors: boolean, intersectionState: IntersectionState, recursionFlags: RecursionFlags, oneOfRoot: boolean): Ternary {
             if (overflow) {
                 return Ternary.False;
             }
-            const id = getRelationKey(source, target, intersectionState, relation, /*ignoreConstraints*/ false, sourceOneOfTypeMapper, targetOneOfTypeMapper);
+            const id = getRelationKey(source, target, intersectionState, relation, /*ignoreConstraints*/ false, oneOfRoot, sourceOneOfTypeMapper, targetOneOfTypeMapper);
             const entry = relation.get(id);
             if (entry !== undefined) {
                 if (reportErrors && entry & RelationComparisonResult.Failed && !(entry & RelationComparisonResult.Reported)) {
@@ -21397,7 +21397,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 // A key that starts with "*" is an indication that we have type references that reference constrained
                 // type parameters. For such keys we also check against the key we would have gotten if all type parameters
                 // were unconstrained.
-                const broadestEquivalentId = id.startsWith("*") ? getRelationKey(source, target, intersectionState, relation, /*ignoreConstraints*/ true, sourceOneOfTypeMapper, targetOneOfTypeMapper) : undefined;
+                const broadestEquivalentId = id.startsWith("*") ? getRelationKey(source, target, intersectionState, relation, /*ignoreConstraints*/ true, oneOfRoot, sourceOneOfTypeMapper, targetOneOfTypeMapper) : undefined;
                 for (let i = 0; i < maybeCount; i++) {
                     // If source and target are already being compared, consider them related with assumptions
                     if (id === maybeKeys[i] || broadestEquivalentId && broadestEquivalentId === maybeKeys[i]) {
@@ -21447,7 +21447,9 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             }
             else {
                 tracing?.push(tracing.Phase.CheckTypes, "structuredTypeRelatedTo", { sourceId: source.id, targetId: target.id });
-                result = structuredTypeRelatedTo(source, target, reportErrors, intersectionState);
+                result = oneOfRoot
+                    ? structuredTypeRelatedToOneOf(source, target, reportErrors, intersectionState)
+                    : structuredTypeRelatedTo(source, target, reportErrors, intersectionState);
                 tracing?.pop();
             }
 
@@ -21549,10 +21551,10 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             const targetFlags = target.flags;
 
             if (source.flags & TypeFlags.AllOf) {
-                return isRelatedToOneOf((source as AllOfType).origin, target, RecursionFlags.None, reportErrors, /*headMessage*/ undefined, intersectionState);
+                return isRelatedTo((source as AllOfType).origin, target, RecursionFlags.None, reportErrors, /*headMessage*/ undefined, intersectionState, /*oneOfRoot*/ true);
             }
             if (target.flags & TypeFlags.AllOf) {
-                return isRelatedToOneOf(source, (target as AllOfType).origin, RecursionFlags.None, reportErrors, /*headMessage*/ undefined, intersectionState);
+                return isRelatedTo(source, (target as AllOfType).origin, RecursionFlags.None, reportErrors, /*headMessage*/ undefined, intersectionState, /*oneOfRoot*/ true);
             }
             if (source.flags & TypeFlags.OneOf) {
                 return isRelatedTo(getSourceOneOfSubstitution(source as OneOfType), target, RecursionFlags.None, reportErrors, /*headMessage*/ undefined, intersectionState);
@@ -23134,7 +23136,11 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         }
     }
 
-    function getRelationKeyTypeMapperSuffix(mapper: TypeMapper): string {
+    function getRelationKeyTypeMapperSuffix(mapper: TypeMapper | undefined): string {
+        if (!mapper) {
+            return "";
+        }
+
         switch (mapper.kind) {
             case TypeMapKind.Array:
                 return mapper.sources.map((oneOf, i) => `${oneOf.id}=${mapper.targets![i].id}`).join(",");
@@ -23149,7 +23155,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
      * To improve caching, the relation key for two generic types uses the target's id plus ids of the type parameters.
      * For other cases, the types ids are used.
      */
-    function getRelationKey(source: Type, target: Type, intersectionState: IntersectionState, relation: Map<string, RelationComparisonResult>, ignoreConstraints: boolean, sourceOneOfTypeMapper?: TypeMapper, targetOneOfTypeMapper?: TypeMapper) {
+    function getRelationKey(source: Type, target: Type, intersectionState: IntersectionState, relation: Map<string, RelationComparisonResult>, ignoreConstraints: boolean, oneOfRoot = true, sourceOneOfTypeMapper?: TypeMapper, targetOneOfTypeMapper?: TypeMapper) {
         if (relation === identityRelation && source.id > target.id) {
             const temp = source;
             source = target;
@@ -23157,10 +23163,8 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         }
         const postFix = `${
             intersectionState ? ":" + intersectionState : ""
-        }|${
-            sourceOneOfTypeMapper && getRelationKeyTypeMapperSuffix(sourceOneOfTypeMapper)
-        }|${
-            targetOneOfTypeMapper && getRelationKeyTypeMapperSuffix(targetOneOfTypeMapper)
+        }${
+            oneOfRoot ? "" : `|${getRelationKeyTypeMapperSuffix(sourceOneOfTypeMapper)}|${getRelationKeyTypeMapperSuffix(targetOneOfTypeMapper)}`
         }`;
         return isTypeReferenceWithGenericArguments(source) && isTypeReferenceWithGenericArguments(target) ?
             getGenericTypeReferenceRelationKey(source as TypeReference, target as TypeReference, postFix, ignoreConstraints) :
