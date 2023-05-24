@@ -11,6 +11,7 @@ import {
     LineAndCharacter,
     Node,
     ObjectFlags,
+    ObjectType,
     Path,
     ReverseMappedType,
     SubstitutionType,
@@ -334,6 +335,7 @@ export namespace tracingEnabled {
                 destructuringPattern: getLocation(type.pattern),
                 firstDeclaration: getLocation(symbol?.declarations?.[0]),
                 flags: Debug.formatTypeFlags(type.flags).split("|"),
+                objectFlags: (type.flags & TypeFlags.Object) ? Debug.formatObjectFlags((type as ObjectType).objectFlags) : undefined,
                 display,
             };
 

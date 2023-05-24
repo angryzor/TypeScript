@@ -3631,6 +3631,10 @@
         "category": "Error",
         "code": 2849
     },
+    "With the following substitutions in '{0}': {1}": {
+        "category": "Error",
+        "code": 2850
+    },
 
     "Import declaration '{0}' is using private name '{1}'.": {
         "category": "Error",

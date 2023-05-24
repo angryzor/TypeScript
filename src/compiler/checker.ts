@@ -8,6 +8,7 @@ import {
     addSyntheticLeadingComment,
     AliasDeclarationNode,
     AllAccessorDeclarations,
+    AllOfType,
     AmbientModuleDeclaration,
     and,
     AnonymousType,
@@ -869,6 +870,7 @@ import {
     ObjectLiteralElementLike,
     ObjectLiteralExpression,
     ObjectType,
+    OneOfType,
     OptionalChain,
     OptionalTypeNode,
     or,
@@ -1073,6 +1075,7 @@ import {
     WideningContext,
     WithStatement,
     YieldExpression,
+    zipWith,
 } from "./_namespaces/ts";
 import * as moduleSpecifiers from "./_namespaces/ts.moduleSpecifiers";
 import * as performance from "./_namespaces/ts.performance";
@@ -6249,6 +6252,24 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         return typeToString(type, /*enclosingDeclaration*/ undefined, TypeFormatFlags.UseFullyQualifiedType);
     }
 
+    function getTypeMapperMappingsForErrorDisplay(mapper: TypeMapper): string {
+        switch (mapper.kind) {
+            case TypeMapKind.Function: return "(opaque mapping)";
+            case TypeMapKind.Simple: return `${getTypeNameForErrorDisplay(mapper.source)} -> ${getTypeNameForErrorDisplay(mapper.target)}`;
+            case TypeMapKind.Array: return zipWith(
+                mapper.sources,
+                mapper.targets || map(mapper.sources, () => undefined),
+                (s, t) => `${getTypeNameForErrorDisplay(s)} -> ${t ? getTypeNameForErrorDisplay(t) : "any"}`).join(", ");
+            case TypeMapKind.Deferred: return zipWith(
+                mapper.sources,
+                mapper.targets,
+                (s, t) => `${getTypeNameForErrorDisplay(s)} -> ${getTypeNameForErrorDisplay(t())}`).join(", ");
+            case TypeMapKind.Merged:
+            case TypeMapKind.Composite: return `m1: ${getTypeMapperMappingsForErrorDisplay(mapper.mapper1)}, ${getTypeMapperMappingsForErrorDisplay(mapper.mapper2)}`;
+            default: return Debug.assertNever(mapper);
+        }
+    }
+
     function symbolValueDeclarationIsContextSensitive(symbol: Symbol): boolean {
         return symbol && !!symbol.valueDeclaration && isExpression(symbol.valueDeclaration) && !isContextSensitive(symbol.valueDeclaration);
     }
@@ -6544,6 +6565,12 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                     }
                     return undefined!; // TODO: GH#18217
                 }
+            }
+            if (type.flags & TypeFlags.OneOf) {
+                return factory.createTypeOperatorNode(SyntaxKind.OneOfKeyword, typeToTypeNodeHelper((type as OneOfType).origin, context));
+            }
+            if (type.flags & TypeFlags.AllOf) {
+                return factory.createTypeOperatorNode(SyntaxKind.AllOfKeyword, typeToTypeNodeHelper((type as AllOfType).origin, context));
             }
             if (objectFlags & (ObjectFlags.Anonymous | ObjectFlags.Mapped)) {
                 Debug.assert(!!(type.flags & TypeFlags.Object));
@@ -13054,6 +13081,26 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         return append(indexInfos, newInfo);
     }
 
+    function resolveOneOfTypeMembers(type: OneOfType) {
+        const union = type.origin;
+        const resolvedUnion = resolveStructuredTypeMembers(union);
+        const callSignatures = resolvedUnion.callSignatures;
+        const constructSignatures = resolvedUnion.constructSignatures;
+        const indexInfos = resolvedUnion.indexInfos;
+        // const callSignatures = instantiateSignatures(getSignaturesOfType(type.target, SignatureKind.Call), type.mapper!);
+        // const constructSignatures = instantiateSignatures(getSignaturesOfType(type.target, SignatureKind.Construct), type.mapper!);
+        // const indexInfos = instantiateIndexInfos(getIndexInfosOfType(type.target), type.mapper!);
+        setStructuredTypeMembers(type, emptySymbols, callSignatures, constructSignatures, indexInfos);
+    }
+
+    function resolveAllOfTypeMembers(type: AllOfType) {
+        const child = type.origin;
+        const callSignatures = getSignaturesOfType(child, SignatureKind.Call);
+        const constructSignatures = getSignaturesOfType(child, SignatureKind.Construct);
+        const indexInfos = getIndexInfosOfType(child);
+        setStructuredTypeMembers(type, emptySymbols, callSignatures, constructSignatures, indexInfos);
+    }
+
     /**
      * Converts an AnonymousType to a ResolvedType.
      */
@@ -13464,6 +13511,12 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             else if (type.flags & TypeFlags.Intersection) {
                 resolveIntersectionTypeMembers(type as IntersectionType);
             }
+            else if (type.flags & TypeFlags.OneOf) {
+                resolveOneOfTypeMembers(type as OneOfType);
+            }
+            else if (type.flags & TypeFlags.AllOf) {
+                resolveAllOfTypeMembers(type as AllOfType);
+            }
             else {
                 Debug.fail("Unhandled type " + Debug.formatTypeFlags(type.flags));
             }
@@ -13515,10 +13568,20 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         return type.resolvedProperties;
     }
 
+    function getPropertiesOfOneOfType(type: OneOfType): Symbol[] {
+        // if (!type.resolvedProperties) {
+        //     const unionProps = getPropertiesOfUnionOrIntersectionType(type.origin);
+
+        //     type.resolvedProperties = unionProps.map(prop => createSymbolWithType(prop, getDeferredPropAccess(type, prop)));
+        // }
+        // return type.resolvedProperties;
+        return getPropertiesOfUnionOrIntersectionType(type.origin);
+    }
+
     function getPropertiesOfType(type: Type): Symbol[] {
         type = getReducedApparentType(type);
-        return type.flags & TypeFlags.UnionOrIntersection ?
-            getPropertiesOfUnionOrIntersectionType(type as UnionType) :
+        return type.flags & TypeFlags.OneOf ? getPropertiesOfOneOfType(type as OneOfType) :
+            type.flags & TypeFlags.UnionOrIntersection ? getPropertiesOfUnionOrIntersectionType(type as UnionType) :
             getPropertiesOfObjectType(type);
     }
 
@@ -14161,6 +14224,23 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         return property && !(getCheckFlags(property) & CheckFlags.ReadPartial) ? property : undefined;
     }
 
+    function getPropertyOfOneOfType(type: OneOfType, name: __String, skipObjectFunctionPropertyAugment?: boolean): Symbol | undefined {
+        // let property = type.propertyCache?.get(name);
+
+        // if (!property) {
+        //     const unionProperty = getPropertyOfUnionOrIntersectionType(type.origin, name, skipObjectFunctionPropertyAugment);
+
+        //     if(unionProperty) {
+        //         property = createSymbolWithType(unionProperty, getDeferredIndexedAccessType(type, createLiteralType(TypeFlags.StringLiteral, symbolName(unionProperty))));
+
+        //         (type.propertyCache ||= createSymbolTable()).set(name, property);
+        //     }
+        // }
+
+        // return property;
+        return getPropertyOfUnionOrIntersectionType(type.origin, name, skipObjectFunctionPropertyAugment);
+    }
+
     /**
      * Return the reduced form of the given type. For a union type, it is a union of the normalized constituent types.
      * For an intersection of types containing one or more mututally exclusive discriminant properties, it is 'never'.
@@ -14274,6 +14354,9 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         }
         if (type.flags & TypeFlags.UnionOrIntersection) {
             return getPropertyOfUnionOrIntersectionType(type as UnionOrIntersectionType, name, skipObjectFunctionPropertyAugment);
+        }
+        if (type.flags & TypeFlags.OneOf) {
+            return getPropertyOfOneOfType(type as OneOfType, name, skipObjectFunctionPropertyAugment);
         }
         return undefined;
     }
@@ -16911,6 +16994,30 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         return links.resolvedType;
     }
 
+    function createAllOfType(origin: Type) {
+        const result = createType(TypeFlags.AllOf) as AllOfType;
+        result.origin = origin;
+        return result;
+    }
+
+    function getAllOfType(origin: Type) {
+        return createAllOfType(origin);
+    }
+
+    function createOneOfType(origin: UnionType) {
+        const result = createType(TypeFlags.OneOf) as OneOfType;
+        result.origin = origin;
+        return result;
+    }
+
+    function getOneOfType(origin: Type) {
+        // Squash nested oneofs. `mapType` will join the unions.
+        const mapped = mapType(origin, type => type.flags & TypeFlags.OneOf ? (type as OneOfType).origin : type);
+
+        // Don't pack unary types. Their type is definite.
+        return mapped.flags & (TypeFlags.Union | TypeFlags.InstantiableNonPrimitive) ? createOneOfType(mapped as UnionType) : mapped;
+    }
+
     function createIndexType(type: InstantiableType | UnionOrIntersectionType, indexFlags: IndexFlags) {
         const result = createType(TypeFlags.Index) as IndexType;
         result.type = type;
@@ -17079,6 +17186,12 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             switch (node.operator) {
                 case SyntaxKind.KeyOfKeyword:
                     links.resolvedType = getIndexType(getTypeFromTypeNode(node.type));
+                    break;
+                case SyntaxKind.AllOfKeyword:
+                    links.resolvedType = getAllOfType(getTypeFromTypeNode(node.type));
+                    break;
+                case SyntaxKind.OneOfKeyword:
+                    links.resolvedType = getOneOfType(getTypeFromTypeNode(node.type));
                     break;
                 case SyntaxKind.UniqueKeyword:
                     links.resolvedType = node.type.kind === SyntaxKind.SymbolKeyword
@@ -17498,6 +17611,18 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             !!(type.flags & TypeFlags.StringMapping) && isPatternLiteralPlaceholderType((type as StringMappingType).type);
     }
 
+    function isOneOfObjectType(type: Type): boolean {
+        if (type.flags & TypeFlags.OneOf) {
+            return true;
+        }
+        if (type.flags & TypeFlags.TypeParameter) {
+            const tp = type as TypeParameter;
+
+            return !!(tp.constraint && tp.constraint.flags & TypeFlags.OneOf);
+        }
+        return false;
+    }
+
     function isGenericType(type: Type): boolean {
         return !!getGenericObjectFlags(type);
     }
@@ -17661,6 +17786,20 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         });
     }
 
+    function getDeferredIndexedAccessType(objectType: Type, indexType: Type, accessFlags = AccessFlags.None, aliasSymbol?: Symbol, aliasTypeArguments?: readonly Type[]) {
+        const persistentAccessFlags = accessFlags & AccessFlags.Persistent;
+        const id = objectType.id + "," + indexType.id + "," + persistentAccessFlags + getAliasId(aliasSymbol, aliasTypeArguments);
+        let type = indexedAccessTypes.get(id);
+        if (!type) {
+            indexedAccessTypes.set(id, type = createIndexedAccessType(objectType, indexType, persistentAccessFlags, aliasSymbol, aliasTypeArguments));
+        }
+        return type;
+    }
+
+    function getDeferredPropAccess(type: Type, prop: Symbol) {
+        return getDeferredIndexedAccessType(type, getLiteralTypeFromProperty(prop, TypeFlags.StringOrNumberLiteralOrUnique));
+    }
+
     function getIndexedAccessTypeOrUndefined(objectType: Type, indexType: Type, accessFlags = AccessFlags.None, accessNode?: ElementAccessExpression | IndexedAccessTypeNode | PropertyName | BindingName | SyntheticExpression, aliasSymbol?: Symbol, aliasTypeArguments?: readonly Type[]): Type | undefined {
         if (objectType === wildcardType || indexType === wildcardType) {
             return wildcardType;
@@ -17687,19 +17826,16 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 return objectType;
             }
             // Defer the operation by creating an indexed access type.
-            const persistentAccessFlags = accessFlags & AccessFlags.Persistent;
-            const id = objectType.id + "," + indexType.id + "," + persistentAccessFlags + getAliasId(aliasSymbol, aliasTypeArguments);
-            let type = indexedAccessTypes.get(id);
-            if (!type) {
-                indexedAccessTypes.set(id, type = createIndexedAccessType(objectType, indexType, persistentAccessFlags, aliasSymbol, aliasTypeArguments));
-            }
-
-            return type;
+            return getDeferredIndexedAccessType(objectType, indexType, accessFlags, aliasSymbol, aliasTypeArguments);
         }
         // In the following we resolve T[K] to the type of the property in T selected by K.
         // We treat boolean as different from other unions to improve errors;
         // skipping straight to getPropertyTypeForIndexType gives errors with 'boolean' instead of 'true'.
         const apparentObjectType = getReducedApparentType(objectType);
+        // Also defer indexing when the apparent object type is a oneof type.
+        if (isOneOfObjectType(objectType)) {
+            return getDeferredIndexedAccessType(objectType, indexType, accessFlags, aliasSymbol, aliasTypeArguments);
+        }
         if (indexType.flags & TypeFlags.Union && !(indexType.flags & TypeFlags.Boolean)) {
             const propTypes: Type[] = [];
             let wasMissingProp = false;
@@ -19063,6 +19199,12 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 getIntersectionType(newTypes, newAliasSymbol, newAliasTypeArguments) :
                 getUnionType(newTypes, UnionReduction.Literal, newAliasSymbol, newAliasTypeArguments);
         }
+        if (flags & TypeFlags.OneOf) {
+            return getOneOfType(instantiateType((type as OneOfType).origin, mapper));
+        }
+        if (flags & TypeFlags.AllOf) {
+            return getAllOfType(instantiateType((type as AllOfType).origin, mapper));
+        }
         if (flags & TypeFlags.Index) {
             return getIndexType(instantiateType((type as IndexType).type, mapper));
         }
@@ -20280,10 +20422,15 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         let overrideNextErrorInfo = 0; // How many `reportRelationError` calls should be skipped in the elaboration pyramid
         let lastSkippedInfo: [Type, Type] | undefined;
         let incompatibleStack: DiagnosticAndArguments[] | undefined;
+        let sourceOneOfTypeMapper: TypeMapper | undefined;
+        let targetOneOfTypeMapper: TypeMapper | undefined;
+        let newSourceOneOfs: OneOfType[];
+        let newTargetOneOfs: OneOfType[];
+        let logindent = "";
 
         Debug.assert(relation !== identityRelation || !errorNode, "no error reporting in identity checking");
 
-        const result = isRelatedTo(source, target, RecursionFlags.Both, /*reportErrors*/ !!errorNode, headMessage);
+        const result = isRelatedToOneOf(source, target, RecursionFlags.Both, /*reportErrors*/ !!errorNode, headMessage);
         if (incompatibleStack) {
             reportIncompatibleStack();
         }
@@ -20489,7 +20636,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             let generalizedSource = source;
             let generalizedSourceType = sourceType;
 
-            if (isLiteralType(source) && !typeCouldHaveTopLevelSingletonTypes(target)) {
+            if (isLiteralType(source) && !typeCouldHaveTopLevelSingletonTypes(target) && !(target.flags & TypeFlags.OneOf)) {
                 generalizedSource = getBaseTypeOfLiteralType(source);
                 Debug.assert(!isTypeAssignableTo(generalizedSource, target), "generalized source shouldn't be assignable");
                 generalizedSourceType = getTypeNameForErrorDisplay(generalizedSource);
@@ -20609,6 +20756,8 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
          * * Ternary.False if they are not related.
          */
         function isRelatedTo(originalSource: Type, originalTarget: Type, recursionFlags: RecursionFlags = RecursionFlags.Both, reportErrors = false, headMessage?: DiagnosticMessage, intersectionState = IntersectionState.None): Ternary {
+            // console.log(logindent + `${getTypeNameForErrorDisplay(originalSource)} <-> ${getTypeNameForErrorDisplay(originalTarget)}`);
+
             // Before normalization: if `source` is type an object type, and `target` is primitive,
             // skip all the checks we don't need and just return `isSimpleTypeRelatedTo` result
             if (originalSource.flags & TypeFlags.Object && originalTarget.flags & TypeFlags.Primitive) {
@@ -21055,6 +21204,131 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             return result;
         }
 
+        function reportSubstitutions(type: Type, mapper: TypeMapper | undefined) {
+            if (mapper) {
+                reportError(Diagnostics.With_the_following_substitutions_in_0_Colon_1, getTypeNameForErrorDisplay(type), getTypeMapperMappingsForErrorDisplay(mapper));
+            }
+        }
+
+        function generateOneOfTypeMappers(oneOfs: OneOfType[]) {
+            const instantiations = cartesianProduct(oneOfs.map(oneOf => oneOf.origin.types));
+
+            return instantiations.map(instantiation => makeArrayTypeMapper(oneOfs, instantiation));
+        }
+
+        function extendOneOfTypeMappers(existingMappers: (TypeMapper | undefined)[], newOneOfs: OneOfType[]) {
+            if (newOneOfs.length === 0) {
+                return existingMappers;
+            }
+
+            const newMappers = generateOneOfTypeMappers(newOneOfs);
+
+            return existingMappers.flatMap(mapper1 => newMappers.map(mapper2 => mergeTypeMappers(mapper1, mapper2)));
+        }
+
+        function getOneOfSubstitution(oneOf: OneOfType, mapper: TypeMapper | undefined, newList: OneOfType[]) {
+            let mappedType: Type;
+
+            if (!mapper || (mappedType = getMappedType(oneOf, mapper)) === oneOf) {
+                newList.push(oneOf);
+                return oneOf.origin.types[0];
+            }
+
+            return mappedType;
+        }
+
+        function getSourceOneOfSubstitution(oneOf: OneOfType) {
+            return getOneOfSubstitution(oneOf, sourceOneOfTypeMapper, newSourceOneOfs);
+        }
+
+        function getTargetOneOfSubstitution(oneOf: OneOfType) {
+            return getOneOfSubstitution(oneOf, targetOneOfTypeMapper, newTargetOneOfs);
+        }
+
+        function isRelatedToOneOf(source: Type, target: Type, recursionFlags: RecursionFlags = RecursionFlags.Both, reportErrors = false, headMessage?: DiagnosticMessage, intersectionState = IntersectionState.None): Ternary {
+            const sourceParentMapper = sourceOneOfTypeMapper;
+            const targetParentMapper = targetOneOfTypeMapper;
+
+            let sourceMappers: (TypeMapper | undefined)[] = [undefined];
+
+            // console.log(logindent + `${getTypeNameForErrorDisplay(source)} <-> ${getTypeNameForErrorDisplay(target)}`);
+
+            let result = Ternary.True;
+            while (sourceMappers.length > 0) {
+                const sourceMapper = sourceMappers[0];
+                sourceOneOfTypeMapper = sourceMapper ? mergeTypeMappers(sourceParentMapper, sourceMapper) : sourceParentMapper;
+                // if (sourceMapper) {
+                //     console.log(logindent + "mapping source", getTypeMapperMappingsForErrorDisplay(sourceMapper));
+                // }
+
+                let targetMappers: (TypeMapper | undefined)[] = [undefined];
+                const saveErrorInfo = captureErrorCalculationState();
+                let intermediateResult = Ternary.False;
+
+                while (targetMappers.length > 0) {
+                    const targetMapper = targetMappers[0];
+                    targetOneOfTypeMapper = targetMapper ? mergeTypeMappers(targetParentMapper, targetMapper) : targetParentMapper;
+
+                    // Only keep the last error.
+                    resetErrorInfo(saveErrorInfo);
+
+                    // if (targetMapper) {
+                    //     console.log(logindent + "mapping target", getTypeMapperMappingsForErrorDisplay(targetMapper));
+                    // }
+
+                    newSourceOneOfs = [];
+                    newTargetOneOfs = [];
+
+                    // console.log(logindent + `child ${getTypeNameForErrorDisplay(source)} <-> ${getTypeNameForErrorDisplay(target)}`);
+
+                    // logindent += "  ";
+
+                    const related = isRelatedTo(source, target, recursionFlags, reportErrors, headMessage, intersectionState);
+
+                    // logindent = logindent.slice(0, logindent.length - 2);
+
+                    // console.log(logindent + `child ${getTypeNameForErrorDisplay(source)} <-> ${getTypeNameForErrorDisplay(target)} result: ${related}`);
+
+                    // console.log(logindent + "new source oneofs:", newSourceOneOfs.map(o => o.id));
+                    // console.log(logindent + "new target oneofs:", newTargetOneOfs.map(o => o.id));
+
+                    sourceMappers = extendOneOfTypeMappers(sourceMappers, newSourceOneOfs);
+                    targetMappers = extendOneOfTypeMappers(targetMappers, newTargetOneOfs);
+
+                    // console.log(logindent + "new source mappers:", sourceMappers.map(o => o && getTypeMapperMappingsForErrorDisplay(o)));
+                    // console.log(logindent + "new target mappers:", targetMappers.map(o => o && getTypeMapperMappingsForErrorDisplay(o)));
+
+                    if (related) {
+                        intermediateResult = related;
+                        break;
+                    }
+
+                    targetMappers = targetMappers.slice(1);
+
+                    if (reportErrors) {
+                        reportSubstitutions(target, targetMapper);
+                        reportSubstitutions(source, sourceMapper);
+                    }
+                }
+
+                if (!intermediateResult) {
+                    result = Ternary.False;
+                    break;
+                }
+
+                sourceMappers = sourceMappers.slice(1);
+
+                result &= intermediateResult;
+            }
+
+            sourceOneOfTypeMapper = sourceParentMapper;
+            targetOneOfTypeMapper = targetParentMapper;
+
+            // console.log(logindent + `${getTypeNameForErrorDisplay(source)} <-> ${getTypeNameForErrorDisplay(target)} result: ${result}`);
+
+            return result;
+        }
+
         function typeArgumentsRelatedTo(sources: readonly Type[] = emptyArray, targets: readonly Type[] = emptyArray, variances: readonly VarianceFlags[] = emptyArray, reportErrors: boolean, intersectionState: IntersectionState): Ternary {
             if (sources.length !== targets.length && relation === identityRelation) {
                 return Ternary.False;
@@ -21121,7 +21395,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             if (overflow) {
                 return Ternary.False;
             }
-            const id = getRelationKey(source, target, intersectionState, relation, /*ignoreConstraints*/ false);
+            const id = getRelationKey(source, target, intersectionState, relation, /*ignoreConstraints*/ false, sourceOneOfTypeMapper, targetOneOfTypeMapper);
             const entry = relation.get(id);
             if (entry !== undefined) {
                 if (reportErrors && entry & RelationComparisonResult.Failed && !(entry & RelationComparisonResult.Reported)) {
@@ -21151,7 +21425,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 // A key that starts with "*" is an indication that we have type references that reference constrained
                 // type parameters. For such keys we also check against the key we would have gotten if all type parameters
                 // were unconstrained.
-                const broadestEquivalentId = id.startsWith("*") ? getRelationKey(source, target, intersectionState, relation, /*ignoreConstraints*/ true) : undefined;
+                const broadestEquivalentId = id.startsWith("*") ? getRelationKey(source, target, intersectionState, relation, /*ignoreConstraints*/ true, sourceOneOfTypeMapper, targetOneOfTypeMapper) : undefined;
                 for (let i = 0; i < maybeCount; i++) {
                     // If source and target are already being compared, consider them related with assumptions
                     if (id === maybeKeys[i] || broadestEquivalentId && broadestEquivalentId === maybeKeys[i]) {
@@ -21301,6 +21575,32 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             let varianceCheckFailed = false;
             let sourceFlags = source.flags;
             const targetFlags = target.flags;
+
+            if (source.flags & TypeFlags.AllOf) {
+                return isRelatedToOneOf((source as AllOfType).origin, target, RecursionFlags.None, reportErrors, /*headMessage*/ undefined, intersectionState);
+            }
+            if (target.flags & TypeFlags.AllOf) {
+                return isRelatedToOneOf(source, (target as AllOfType).origin, RecursionFlags.None, reportErrors, /*headMessage*/ undefined, intersectionState);
+            }
+            if (source.flags & TypeFlags.OneOf) {
+                return isRelatedTo(getSourceOneOfSubstitution(source as OneOfType), target, RecursionFlags.None, reportErrors, /*headMessage*/ undefined, intersectionState);
+            }
+            if (target.flags & TypeFlags.OneOf) {
+                return isRelatedTo(source, getTargetOneOfSubstitution(target as OneOfType), RecursionFlags.None, reportErrors, /*headMessage*/ undefined, intersectionState);
+            }
+            if (source.flags & TypeFlags.IndexedAccess && (source as IndexedAccessType).objectType.flags & TypeFlags.OneOf) {
+                return isRelatedTo(getIndexedAccessType(
+                    getSourceOneOfSubstitution((source as IndexedAccessType).objectType as OneOfType),
+                    (source as IndexedAccessType).indexType,
+                ), target, RecursionFlags.None, reportErrors, /*headMessage*/ undefined, intersectionState);
+            }
+            if (target.flags & TypeFlags.IndexedAccess && (target as IndexedAccessType).objectType.flags & TypeFlags.OneOf) {
+                return isRelatedTo(source, getIndexedAccessType(
+                    getTargetOneOfSubstitution((target as IndexedAccessType).objectType as OneOfType),
+                    (target as IndexedAccessType).indexType,
+                ), RecursionFlags.None, reportErrors, /*headMessage*/ undefined, intersectionState);
+            }
+
             if (relation === identityRelation) {
                 // We've already checked that source.flags and target.flags are identical
                 if (sourceFlags & TypeFlags.UnionOrIntersection) {
@@ -22862,17 +23162,34 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         }
     }
 
+    function getRelationKeyTypeMapperSuffix(mapper: TypeMapper): string {
+        switch (mapper.kind) {
+            case TypeMapKind.Array:
+                return mapper.sources.map((oneOf, i) => `${oneOf.id}=${mapper.targets![i].id}`).join(",");
+            case TypeMapKind.Merged:
+                return `${getRelationKeyTypeMapperSuffix(mapper.mapper1)},${getRelationKeyTypeMapperSuffix(mapper.mapper2)}`;
+            default:
+                throw new Error("unsupported mapper type for relation key");
+        }
+    }
+
     /**
      * To improve caching, the relation key for two generic types uses the target's id plus ids of the type parameters.
      * For other cases, the types ids are used.
      */
-    function getRelationKey(source: Type, target: Type, intersectionState: IntersectionState, relation: Map<string, RelationComparisonResult>, ignoreConstraints: boolean) {
+    function getRelationKey(source: Type, target: Type, intersectionState: IntersectionState, relation: Map<string, RelationComparisonResult>, ignoreConstraints: boolean, sourceOneOfTypeMapper?: TypeMapper, targetOneOfTypeMapper?: TypeMapper) {
         if (relation === identityRelation && source.id > target.id) {
             const temp = source;
             source = target;
             target = temp;
         }
-        const postFix = intersectionState ? ":" + intersectionState : "";
+        const postFix = `${
+            intersectionState ? ":" + intersectionState : ""
+        }|${
+            sourceOneOfTypeMapper && getRelationKeyTypeMapperSuffix(sourceOneOfTypeMapper)
+        }|${
+            targetOneOfTypeMapper && getRelationKeyTypeMapperSuffix(targetOneOfTypeMapper)
+        }`;
         return isTypeReferenceWithGenericArguments(source) && isTypeReferenceWithGenericArguments(target) ?
             getGenericTypeReferenceRelationKey(source as TypeReference, target as TypeReference, postFix, ignoreConstraints) :
             `${source.id},${target.id}${postFix}`;
@@ -22988,6 +23305,9 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 // We track all object types that have an associated symbol (representing the origin of the type), but
                 // exclude the static side of classes from this check since it shares its symbol with the instance side.
                 return type.symbol;
+            }
+            if (getObjectFlags(type) & ObjectFlags.ReverseMapped) {
+                return (type as ReverseMappedType).mappedType.symbol;
             }
             if (isTupleType(type)) {
                 return type.target;
@@ -24001,7 +24321,8 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 objectFlags & ObjectFlags.Reference && ((type as TypeReference).node || some(getTypeArguments(type as TypeReference), couldContainTypeVariables)) ||
                 objectFlags & ObjectFlags.Anonymous && type.symbol && type.symbol.flags & (SymbolFlags.Function | SymbolFlags.Method | SymbolFlags.Class | SymbolFlags.TypeLiteral | SymbolFlags.ObjectLiteral) && type.symbol.declarations ||
                 objectFlags & (ObjectFlags.Mapped | ObjectFlags.ReverseMapped | ObjectFlags.ObjectRestType | ObjectFlags.InstantiationExpressionType)) ||
-            type.flags & (TypeFlags.UnionOrIntersection | TypeFlags.TemplateLiteral) && !(type.flags & TypeFlags.EnumLiteral) && !isNonGenericTopLevelType(type) && some((type as UnionOrIntersectionType | TemplateLiteralType).types, couldContainTypeVariables));
+            type.flags & (TypeFlags.UnionOrIntersection | TypeFlags.TemplateLiteral) && !(type.flags & TypeFlags.EnumLiteral) && !isNonGenericTopLevelType(type) && some((type as UnionOrIntersectionType | TemplateLiteralType).types, couldContainTypeVariables) ||
+            type.flags & (TypeFlags.OneOf | TypeFlags.AllOf) && couldContainTypeVariables((type as OneOfType | AllOfType).origin));
         if (type.flags & TypeFlags.ObjectFlagsType) {
             (type as ObjectFlagsType).objectFlags |= ObjectFlags.CouldContainTypeVariablesComputed | (result ? ObjectFlags.CouldContainTypeVariables : 0);
         }
@@ -31552,7 +31873,10 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 return errorType;
             }
 
-            propType = isThisPropertyAccessInConstructor(node, prop) ? autoType : writeOnly || isWriteOnlyAccess(node) ? getWriteTypeOfSymbol(prop) : getTypeOfSymbol(prop);
+            propType = isThisPropertyAccessInConstructor(node, prop) ? autoType
+                : isOneOfObjectType(leftType) ? getDeferredPropAccess(leftType, prop)
+                : writeOnly || isWriteOnlyAccess(node) ? getWriteTypeOfSymbol(prop)
+                : getTypeOfSymbol(prop);
         }
 
         return getFlowTypeOfAccessExpression(node, prop, propType, right, checkMode);

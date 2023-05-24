@@ -122,6 +122,7 @@ export interface Scanner {
 export const textToKeywordObj: MapLike<KeywordSyntaxKind> = {
     abstract: SyntaxKind.AbstractKeyword,
     accessor: SyntaxKind.AccessorKeyword,
+    allof: SyntaxKind.AllOfKeyword,
     any: SyntaxKind.AnyKeyword,
     as: SyntaxKind.AsKeyword,
     asserts: SyntaxKind.AssertsKeyword,
@@ -168,6 +169,7 @@ export const textToKeywordObj: MapLike<KeywordSyntaxKind> = {
     null: SyntaxKind.NullKeyword,
     number: SyntaxKind.NumberKeyword,
     object: SyntaxKind.ObjectKeyword,
+    oneof: SyntaxKind.OneOfKeyword,
     package: SyntaxKind.PackageKeyword,
     private: SyntaxKind.PrivateKeyword,
     protected: SyntaxKind.ProtectedKeyword,

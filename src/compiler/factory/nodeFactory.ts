@@ -2546,7 +2546,7 @@ export function createNodeFactory(flags: NodeFactoryFlags, baseFactory: BaseNode
     }
 
     // @api
-    function createTypeOperatorNode(operator: SyntaxKind.KeyOfKeyword | SyntaxKind.UniqueKeyword | SyntaxKind.ReadonlyKeyword, type: TypeNode): TypeOperatorNode {
+    function createTypeOperatorNode(operator: SyntaxKind.KeyOfKeyword | SyntaxKind.AllOfKeyword | SyntaxKind.OneOfKeyword | SyntaxKind.UniqueKeyword | SyntaxKind.ReadonlyKeyword, type: TypeNode): TypeOperatorNode {
         const node = createBaseNode<TypeOperatorNode>(SyntaxKind.TypeOperator);
         node.operator = operator;
         node.type = operator === SyntaxKind.ReadonlyKeyword ?
