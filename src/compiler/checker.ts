@@ -20426,7 +20426,6 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         let targetOneOfTypeMapper: TypeMapper | undefined;
         let newSourceOneOfs: OneOfType[];
         let newTargetOneOfs: OneOfType[];
-        let logindent = "";
 
         Debug.assert(relation !== identityRelation || !errorNode, "no error reporting in identity checking");
 
@@ -20756,8 +20755,6 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
          * * Ternary.False if they are not related.
          */
         function isRelatedTo(originalSource: Type, originalTarget: Type, recursionFlags: RecursionFlags = RecursionFlags.Both, reportErrors = false, headMessage?: DiagnosticMessage, intersectionState = IntersectionState.None): Ternary {
-            // console.log(logindent + `${getTypeNameForErrorDisplay(originalSource)} <-> ${getTypeNameForErrorDisplay(originalTarget)}`);
-
             // Before normalization: if `source` is type an object type, and `target` is primitive,
             // skip all the checks we don't need and just return `isSimpleTypeRelatedTo` result
             if (originalSource.flags & TypeFlags.Object && originalTarget.flags & TypeFlags.Primitive) {
@@ -21251,15 +21248,10 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
 
             let sourceMappers: (TypeMapper | undefined)[] = [undefined];
 
-            // console.log(logindent + `${getTypeNameForErrorDisplay(source)} <-> ${getTypeNameForErrorDisplay(target)}`);
-
             let result = Ternary.True;
             while (sourceMappers.length > 0) {
                 const sourceMapper = sourceMappers[0];
                 sourceOneOfTypeMapper = sourceMapper ? mergeTypeMappers(sourceParentMapper, sourceMapper) : sourceParentMapper;
-                // if (sourceMapper) {
-                //     console.log(logindent + "mapping source", getTypeMapperMappingsForErrorDisplay(sourceMapper));
-                // }
 
                 let targetMappers: (TypeMapper | undefined)[] = [undefined];
                 const saveErrorInfo = captureErrorCalculationState();
@@ -21272,31 +21264,13 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                     // Only keep the last error.
                     resetErrorInfo(saveErrorInfo);
 
-                    // if (targetMapper) {
-                    //     console.log(logindent + "mapping target", getTypeMapperMappingsForErrorDisplay(targetMapper));
-                    // }
-
                     newSourceOneOfs = [];
                     newTargetOneOfs = [];
 
-                    // console.log(logindent + `child ${getTypeNameForErrorDisplay(source)} <-> ${getTypeNameForErrorDisplay(target)}`);
-
-                    // logindent += "  ";
-
                     const related = isRelatedTo(source, target, recursionFlags, reportErrors, headMessage, intersectionState);
-
-                    // logindent = logindent.slice(0, logindent.length - 2);
-
-                    // console.log(logindent + `child ${getTypeNameForErrorDisplay(source)} <-> ${getTypeNameForErrorDisplay(target)} result: ${related}`);
-
-                    // console.log(logindent + "new source oneofs:", newSourceOneOfs.map(o => o.id));
-                    // console.log(logindent + "new target oneofs:", newTargetOneOfs.map(o => o.id));
 
                     sourceMappers = extendOneOfTypeMappers(sourceMappers, newSourceOneOfs);
                     targetMappers = extendOneOfTypeMappers(targetMappers, newTargetOneOfs);
-
-                    // console.log(logindent + "new source mappers:", sourceMappers.map(o => o && getTypeMapperMappingsForErrorDisplay(o)));
-                    // console.log(logindent + "new target mappers:", targetMappers.map(o => o && getTypeMapperMappingsForErrorDisplay(o)));
 
                     if (related) {
                         intermediateResult = related;
@@ -21323,8 +21297,6 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
 
             sourceOneOfTypeMapper = sourceParentMapper;
             targetOneOfTypeMapper = targetParentMapper;
-
-            // console.log(logindent + `${getTypeNameForErrorDisplay(source)} <-> ${getTypeNameForErrorDisplay(target)} result: ${result}`);
 
             return result;
         }
