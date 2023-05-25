@@ -910,18 +910,13 @@ export const enum RelationComparisonResult {
 }
 
 /** @internal */
-export const enum OneOfEnvironmentRole {
-    Free,
-    Captured,
-}
+export type OneOfEnvironment = Map<OneOfType, Type | undefined>;
 
 /** @internal */
-export type OneOfEnvironment = Map<OneOfType, OneOfEnvironmentRole>;
-
-/** @internal */
-export interface OneOfScope {
-    sourceOneOfs: Map<OneOfType, OneOfEnvironmentRole>;
-    targetOneOfs: Map<OneOfType, OneOfEnvironmentRole>;
+export interface OneOfContext {
+    environment: OneOfEnvironment
+    mapper: TypeMapper | undefined
+    inOneOfContext: boolean
 }
 
 /** @internal */
@@ -931,15 +926,10 @@ export interface OneOfMappingContext {
 }
 
 /** @internal */
-export interface OneOfMappingScope {
-    sourceMapper: TypeMapper | undefined;
-    targetMapper: TypeMapper | undefined;
-}
-
-/** @internal */
 export interface RelationEntry {
     result: RelationComparisonResult
-    oneOfScope: OneOfScope
+    sourceOneOfEnvironment: OneOfEnvironment
+    targetOneOfEnvironment: OneOfEnvironment
 }
 
 /** @internal */
