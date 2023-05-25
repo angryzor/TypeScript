@@ -870,6 +870,11 @@ import {
     ObjectLiteralElementLike,
     ObjectLiteralExpression,
     ObjectType,
+    OneOfEnvironment,
+    OneOfEnvironmentRole,
+    OneOfMappingContext,
+    OneOfMappingScope,
+    OneOfScope,
     OneOfType,
     OptionalChain,
     OptionalTypeNode,
@@ -1302,11 +1307,6 @@ const enum ExpandingFlags {
     Source = 1,
     Target = 1 << 1,
     Both = Source | Target,
-}
-
-interface OneOfScope {
-    sourceOneOfs: Set<OneOfType>
-    targetOneOfs: Set<OneOfType>
 }
 
 const enum MembersOrExportsResolutionKind {
@@ -20431,6 +20431,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         let sourceOneOfTypeMapper: TypeMapper | undefined;
         let targetOneOfTypeMapper: TypeMapper | undefined;
         let oneOfScope: OneOfScope;
+        let logindent = "";
 
         Debug.assert(relation !== identityRelation || !errorNode, "no error reporting in identity checking");
 
@@ -21218,40 +21219,120 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             return instantiations.map(instantiation => makeArrayTypeMapper(oneOfs, instantiation));
         }
 
-        function extendOneOfTypeMappers(existingMappers: (TypeMapper | undefined)[], newOneOfs: Set<OneOfType>) {
-            if (newOneOfs.size === 0) {
+        function extendOneOfTypeMappers(existingMappers: (TypeMapper | undefined)[], environment: OneOfEnvironment) {
+            if (environment.size === 0) {
                 return existingMappers;
             }
 
-            const newMappers = generateOneOfTypeMappers([...newOneOfs]);
+            const newMappers = generateOneOfTypeMappers([...environment.keys()]);
 
             return existingMappers.flatMap(mapper1 => newMappers.map(mapper2 => mergeTypeMappers(mapper1, mapper2)));
         }
 
-        function getOneOfSubstitution(oneOf: OneOfType, mapper: TypeMapper | undefined, newOneOfs: Set<OneOfType>) {
-            let mappedType: Type;
+        function getOneOfSubstitution(oneOf: OneOfType, mapper: TypeMapper | undefined, environment: OneOfEnvironment) {
+            let mappedType!: Type;
 
-            if (!mapper || (mappedType = getMappedType(oneOf, mapper)) === oneOf) {
-                newOneOfs.add(oneOf);
-                return oneOf.origin.types[oneOf.origin.types.length - 1];
+            console.log(logindent, "GETTING SUBST:", oneOf.id);
+
+            if (mapper && (mappedType = getMappedType(oneOf, mapper)) !== oneOf) {
+                console.log(logindent, "MAPPED TYPE FOUND:", oneOf.id, mappedType.id);
+                return mappedType;
             }
 
-            return mappedType;
+            if (mapper) {
+                console.log(logindent, "MAPPED TYPE NOT FOUND:", oneOf.id, mappedType.id);
+            }
+            else {
+                console.log(logindent, "NO MAPPER:", oneOf.id);
+            }
+
+            discoverOneOf(oneOf, environment);
+            return oneOf.origin.types[oneOf.origin.types.length - 1];
+        }
+
+        function discoverOneOf(oneOf: OneOfType, environment: OneOfEnvironment) {
+            environment.set(oneOf, OneOfEnvironmentRole.Free);
         }
 
         function getSourceOneOfSubstitution(oneOf: OneOfType) {
-            return getOneOfSubstitution(oneOf, sourceOneOfTypeMapper, newSourceOneOfs);
+            return getOneOfSubstitution(oneOf, sourceOneOfTypeMapper, oneOfScope.sourceOneOfs);
         }
 
         function getTargetOneOfSubstitution(oneOf: OneOfType) {
-            return getOneOfSubstitution(oneOf, targetOneOfTypeMapper, newTargetOneOfs);
+            return getOneOfSubstitution(oneOf, targetOneOfTypeMapper, oneOfScope.targetOneOfs);
+        }
+
+        function createOneOfEnvironment(): OneOfEnvironment {
+            return new Map<OneOfType, OneOfEnvironmentRole>();
+        }
+
+        function mergeOneOfEnvironment(target: OneOfEnvironment, source: OneOfEnvironment, capture = false) {
+            for (const [oneOf, role] of source) {
+                target.set(oneOf, target.has(oneOf) ? OneOfEnvironmentRole.Free : capture ? OneOfEnvironmentRole.Captured : role);
+            }
+        }
+
+        function createOneOfScope(): OneOfScope {
+            return { sourceOneOfs: createOneOfEnvironment(), targetOneOfs: createOneOfEnvironment() };
         }
 
         function pushOneOfScope(): OneOfScope {
+            console.log(logindent, "ENTERING ONEOF SCOPE");
+            logindent += "  ";
+            const savedScope = oneOfScope;
 
+            oneOfScope = createOneOfScope();
+
+            return savedScope;
+        }
+
+        function popOneOfScope(parentScope: OneOfScope, capture = false) {
+            const childScope = oneOfScope;
+
+            oneOfScope = parentScope;
+
+            mergeOneOfScope(childScope, capture);
+            logindent = logindent.slice(0, logindent.length - 2);
+            console.log(logindent, "LEAVING ONEOF SCOPE");
+        }
+
+        function peekOneOfScope() {
+            return oneOfScope;
+        }
+
+        function mergeOneOfScope(scope: OneOfScope, capture = false) {
+            mergeOneOfEnvironment(oneOfScope.sourceOneOfs, scope.sourceOneOfs, capture);
+            mergeOneOfEnvironment(oneOfScope.targetOneOfs, scope.targetOneOfs, capture);
+        }
+
+        function createOneOfMappingContext(): OneOfMappingContext {
+            return { mappedOneOfs: new Set<OneOfType>(), mapper: undefined };
+        }
+
+        function createOneOfMappingScope(): OneOfMappingScope {
+            return { sourceContext: createOneOfMappingContext(), targetContext: createOneOfMappingContext() };
+        }
+
+        function pushOneOfMappingScope(scope: OneOfMappingScope) {
+            console.log(logindent, "ENTERING ONEOF MAPPING SCOPE");
+            logindent += "  ";
+            const savedScope = oneOfMappingScope;
+
+            oneOfMappingScope = createOneOfMappingScope();
+
+            return savedScope;
+        }
+
+        function popOneOfMappingScope(parentScope: OneOfMappingScope) {
+            oneOfMappingScope = parentScope;
+
+            logindent = logindent.slice(0, logindent.length - 2);
+            console.log(logindent, "LEAVING ONEOF SCOPE");
         }
 
         function structuredTypeRelatedToOneOf(source: Type, target: Type, reportErrors = false, intersectionState = IntersectionState.None): Ternary {
+            const parentScope = pushOneOfScope();
+
             const sourceParentMapper = sourceOneOfTypeMapper;
             const targetParentMapper = targetOneOfTypeMapper;
 
@@ -21259,7 +21340,6 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
 
             let result = Ternary.True;
             while (sourceMappers.length > 0) {
-
                 let targetMappers: (TypeMapper | undefined)[] = [undefined];
                 const saveErrorInfo = captureErrorCalculationState();
                 let intermediateResult = Ternary.False;
@@ -21267,36 +21347,30 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 while (targetMappers.length > 0) {
                     const sourceMapper = sourceMappers[sourceMappers.length - 1];
                     const targetMapper = targetMappers[targetMappers.length - 1];
+
+                    console.log(logindent, "SOURCE MAPPER:", sourceMapper && getTypeMapperMappingsForErrorDisplay(sourceMapper));
+                    console.log(logindent, "TARGET MAPPER:", targetMapper && getTypeMapperMappingsForErrorDisplay(targetMapper));
+
                     sourceOneOfTypeMapper = sourceMapper ? mergeTypeMappers(sourceParentMapper, sourceMapper) : sourceParentMapper;
                     targetOneOfTypeMapper = targetMapper ? mergeTypeMappers(targetParentMapper, targetMapper) : targetParentMapper;
 
                     // Only keep the last error.
                     resetErrorInfo(saveErrorInfo);
 
-                    const saveNewSourceOneOfs = newSourceOneOfs;
-                    const saveNewTargetOneOfs = newTargetOneOfs;
-                    newSourceOneOfs = new Set<OneOfType>();
-                    newTargetOneOfs = new Set<OneOfType>();
+                    const parentScope = pushOneOfScope();
+                    const childScope = peekOneOfScope();
 
                     const related = isRelatedTo(source, target, RecursionFlags.None, reportErrors, /*headMessage*/ undefined, intersectionState);
 
-                    const childNewSourceOneOfs = newSourceOneOfs;
-                    const childNewTargetOneOfs = newTargetOneOfs;
+                    popOneOfScope(parentScope);
 
-                    sourceMappers = extendOneOfTypeMappers(sourceMappers, newSourceOneOfs);
-                    targetMappers = extendOneOfTypeMappers(targetMappers, newTargetOneOfs);
+                    if (childScope.sourceOneOfs.size > 0 || childScope.targetOneOfs.size > 0) {
+                        console.log(logindent, "NEW SOURCE ONEOFS:", [...childScope.sourceOneOfs.keys()].map(x => x.id));
+                        console.log(logindent, "NEW TARGET ONEOFS:", [...childScope.targetOneOfs.keys()].map(x => x.id));
 
-                    for (const oneOf of newSourceOneOfs) {
-                        saveNewSourceOneOfs.add(oneOf);
-                    }
-                    for (const oneOf of newTargetOneOfs) {
-                        saveNewTargetOneOfs.add(oneOf);
-                    }
+                        sourceMappers = extendOneOfTypeMappers(sourceMappers, childScope.sourceOneOfs);
+                        targetMappers = extendOneOfTypeMappers(targetMappers, childScope.targetOneOfs);
 
-                    newSourceOneOfs = saveNewSourceOneOfs;
-                    newTargetOneOfs = saveNewTargetOneOfs;
-
-                    if (childNewSourceOneOfs.size > 0 || childNewTargetOneOfs.size > 0) {
                         continue;
                     }
 
@@ -21325,6 +21399,8 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
 
             sourceOneOfTypeMapper = sourceParentMapper;
             targetOneOfTypeMapper = targetParentMapper;
+
+            popOneOfScope(parentScope, /*capture*/ true);
 
             return result;
         }
@@ -21395,15 +21471,14 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             if (overflow) {
                 return Ternary.False;
             }
-            if (!newSourceOneOfs) {
-                newSourceOneOfs = new Set<OneOfType>();
-                newTargetOneOfs = new Set<OneOfType>();
+            if (!oneOfScope) {
+                oneOfScope = createOneOfScope();
             }
             const id = getRelationKey(source, target, intersectionState, relation, /*ignoreConstraints*/ false, oneOfRoot, sourceOneOfTypeMapper, targetOneOfTypeMapper);
-            console.log("cache id", id, getTypeNameForErrorDisplay(source), getTypeNameForErrorDisplay(target));
+            console.log(logindent, "cache id", id, getTypeNameForErrorDisplay(source), getTypeNameForErrorDisplay(target));
             const entry = relation.get(id);
             if (entry) {
-                console.log("cache hit", entry);
+                console.log(logindent, "cache hit", entry.result, [...entry.oneOfScope.sourceOneOfs].map(o => o.id), [...entry.oneOfScope.targetOneOfs].map(o => o.id));
             }
             if (entry !== undefined) {
                 if (reportErrors && entry.result & RelationComparisonResult.Failed && !(entry.result & RelationComparisonResult.Reported)) {
@@ -21421,12 +21496,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                             instantiateType(source, reportUnreliableMapper);
                         }
                     }
-                    for (const oneOf of entry.newSourceOneOfs) {
-                        newSourceOneOfs.add(oneOf);
-                    }
-                    for (const oneOf of entry.newTargetOneOfs) {
-                        newTargetOneOfs.add(oneOf);
-                    }
+                    mergeOneOfScope(entry.oneOfScope);
                     return entry.result & RelationComparisonResult.Succeeded ? Ternary.True : Ternary.False;
                 }
             }
@@ -21452,10 +21522,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 }
             }
 
-            const saveNewSourceOneOfs = newSourceOneOfs;
-            const saveNewTargetOneOfs = newTargetOneOfs;
-            newSourceOneOfs = new Set<OneOfType>();
-            newTargetOneOfs = new Set<OneOfType>();
+            const parentScope = pushOneOfScope();
 
             const maybeStart = maybeCount;
             maybeKeys[maybeCount] = id;
@@ -21517,7 +21584,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                         // If result is definitely true, record all maybe keys as having succeeded. Also, record Ternary.Maybe
                         // results as having succeeded once we reach depth 0, but never record Ternary.Unknown results.
                         for (let i = maybeStart; i < maybeCount; i++) {
-                            relation.set(maybeKeys[i], { result: RelationComparisonResult.Succeeded | propagatingVarianceFlags, newSourceOneOfs, newTargetOneOfs });
+                            relation.set(maybeKeys[i], { result: RelationComparisonResult.Succeeded | propagatingVarianceFlags, oneOfScope: peekOneOfScope() });
                         }
                     }
                     maybeCount = maybeStart;
@@ -21526,17 +21593,11 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             else {
                 // A false result goes straight into global cache (when something is false under
                 // assumptions it will also be false without assumptions)
-                relation.set(id, { result: (reportErrors ? RelationComparisonResult.Reported : 0) | RelationComparisonResult.Failed | propagatingVarianceFlags, newSourceOneOfs, newTargetOneOfs });
+                relation.set(id, { result: (reportErrors ? RelationComparisonResult.Reported : 0) | RelationComparisonResult.Failed | propagatingVarianceFlags, oneOfScope: peekOneOfScope() });
                 maybeCount = maybeStart;
             }
-            for (const oneOf of newSourceOneOfs) {
-                saveNewSourceOneOfs.add(oneOf);
-            }
-            for (const oneOf of newTargetOneOfs) {
-                saveNewTargetOneOfs.add(oneOf);
-            }
-            newSourceOneOfs = saveNewSourceOneOfs;
-            newTargetOneOfs = saveNewTargetOneOfs;
+            console.log(logindent, 'RESULT:', result);
+            popOneOfScope(parentScope);
             return result;
         }
 
@@ -23221,9 +23282,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         }
         const postFix = `${
             intersectionState ? ":" + intersectionState : ""
-        }${
-            oneOfRoot ? "" : `|${getRelationKeyTypeMapperSuffix(sourceOneOfTypeMapper)}|${getRelationKeyTypeMapperSuffix(targetOneOfTypeMapper)}`
-        }`;
+        }|${oneOfRoot}|${getRelationKeyTypeMapperSuffix(sourceOneOfTypeMapper)}|${getRelationKeyTypeMapperSuffix(targetOneOfTypeMapper)}`;
         return isTypeReferenceWithGenericArguments(source) && isTypeReferenceWithGenericArguments(target) ?
             getGenericTypeReferenceRelationKey(source as TypeReference, target as TypeReference, postFix, ignoreConstraints) :
             `${source.id},${target.id}${postFix}`;
