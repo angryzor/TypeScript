@@ -21206,9 +21206,9 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             return result;
         }
 
-        function reportSubstitutions(context: OneOfContext, type: Type) {
-            if (context.mapper) {
-                reportError(Diagnostics.With_the_following_substitutions_in_0_Colon_1, getTypeNameForErrorDisplay(type), getTypeMapperMappingsForErrorDisplay(context.mapper));
+        function reportSubstitutions(mapper: TypeMapper | undefined, type: Type) {
+            if (mapper) {
+                reportError(Diagnostics.With_the_following_substitutions_in_0_Colon_1, getTypeNameForErrorDisplay(type), getTypeMapperMappingsForErrorDisplay(mapper));
             }
         }
 
@@ -21351,7 +21351,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
 
                 if (!related) {
                     if (reportErrors) {
-                        reportSubstitutions(sourceOneOfContext, source);
+                        reportSubstitutions(mapper, source);
                     }
 
                     result = Ternary.False;
@@ -21393,7 +21393,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 }
 
                 if (reportErrors) {
-                    reportSubstitutions(targetOneOfContext, target);
+                    reportSubstitutions(mapper, target);
                 }
 
                 nextOneOfMapper(mappingContext);
