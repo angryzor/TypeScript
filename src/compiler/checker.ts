@@ -913,6 +913,7 @@ import {
     rangeOfTypeParameters,
     ReadonlyKeyword,
     reduceLeft,
+    Relation,
     RelationComparisonResult,
     relativeComplement,
     removeExtension,
@@ -2197,11 +2198,11 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
     var _jsxNamespace: __String;
     var _jsxFactoryEntity: EntityName | undefined;
 
-    var subtypeRelation = new Map<string, RelationComparisonResult>();
-    var strictSubtypeRelation = new Map<string, RelationComparisonResult>();
-    var assignableRelation = new Map<string, RelationComparisonResult>();
-    var comparableRelation = new Map<string, RelationComparisonResult>();
-    var identityRelation = new Map<string, RelationComparisonResult>();
+    var subtypeRelation = new Relation();
+    var strictSubtypeRelation = new Relation();
+    var assignableRelation = new Relation();
+    var comparableRelation = new Relation();
+    var identityRelation = new Relation();
     var enumRelation = new Map<string, RelationComparisonResult>();
 
     var builtinGlobals = createSymbolTable();
@@ -19448,7 +19449,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
     function checkTypeRelatedToAndOptionallyElaborate(
         source: Type,
         target: Type,
-        relation: Map<string, RelationComparisonResult>,
+        relation: Relation,
         errorNode: Node | undefined,
         expr: Expression | undefined,
         headMessage: DiagnosticMessage | undefined,
@@ -19470,7 +19471,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         node: Expression | undefined,
         source: Type,
         target: Type,
-        relation: Map<string, RelationComparisonResult>,
+        relation: Relation,
         headMessage: DiagnosticMessage | undefined,
         containingMessageChain: (() => DiagnosticMessageChain | undefined) | undefined,
         errorOutputContainer: { errors?: Diagnostic[], skipLogging?: boolean } | undefined
@@ -19507,7 +19508,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         node: Expression,
         source: Type,
         target: Type,
-        relation: Map<string, RelationComparisonResult>,
+        relation: Relation,
         headMessage: DiagnosticMessage | undefined,
         containingMessageChain: (() => DiagnosticMessageChain | undefined) | undefined,
         errorOutputContainer: { errors?: Diagnostic[], skipLogging?: boolean } | undefined
@@ -19536,7 +19537,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         node: ArrowFunction,
         source: Type,
         target: Type,
-        relation: Map<string, RelationComparisonResult>,
+        relation: Relation,
         containingMessageChain: (() => DiagnosticMessageChain | undefined) | undefined,
         errorOutputContainer: { errors?: Diagnostic[], skipLogging?: boolean } | undefined
     ): boolean {
@@ -19620,7 +19621,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         iterator: ElaborationIterator,
         source: Type,
         target: Type,
-        relation: Map<string, RelationComparisonResult>,
+        relation: Relation,
         containingMessageChain: (() => DiagnosticMessageChain | undefined) | undefined,
         errorOutputContainer: { errors?: Diagnostic[], skipLogging?: boolean } | undefined
     ) {
@@ -19697,7 +19698,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         iterator: ElaborationIterator,
         source: Type,
         target: Type,
-        relation: Map<string, RelationComparisonResult>,
+        relation: Relation,
         containingMessageChain: (() => DiagnosticMessageChain | undefined) | undefined,
         errorOutputContainer: { errors?: Diagnostic[], skipLogging?: boolean } | undefined
     ) {
@@ -19800,7 +19801,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         node: JsxAttributes,
         source: Type,
         target: Type,
-        relation: Map<string, RelationComparisonResult>,
+        relation: Relation,
         containingMessageChain: (() => DiagnosticMessageChain | undefined) | undefined,
         errorOutputContainer: { errors?: Diagnostic[], skipLogging?: boolean } | undefined
     ) {
@@ -19911,7 +19912,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         node: ArrayLiteralExpression,
         source: Type,
         target: Type,
-        relation: Map<string, RelationComparisonResult>,
+        relation: Relation,
         containingMessageChain: (() => DiagnosticMessageChain | undefined) | undefined,
         errorOutputContainer: { errors?: Diagnostic[], skipLogging?: boolean } | undefined
     ) {
@@ -19958,7 +19959,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         node: ObjectLiteralExpression,
         source: Type,
         target: Type,
-        relation: Map<string, RelationComparisonResult>,
+        relation: Relation,
         containingMessageChain: (() => DiagnosticMessageChain | undefined) | undefined,
         errorOutputContainer: { errors?: Diagnostic[], skipLogging?: boolean } | undefined
     ) {
@@ -20274,7 +20275,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         return true;
     }
 
-    function isSimpleTypeRelatedTo(source: Type, target: Type, relation: Map<string, RelationComparisonResult>, errorReporter?: ErrorReporter) {
+    function isSimpleTypeRelatedTo(source: Type, target: Type, relation: Relation, errorReporter?: ErrorReporter) {
         const s = source.flags;
         const t = target.flags;
         if (t & TypeFlags.Any || s & TypeFlags.Never || source === wildcardType) return true;
@@ -20318,7 +20319,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         return false;
     }
 
-    function isTypeRelatedTo(source: Type, target: Type, relation: Map<string, RelationComparisonResult>) {
+    function isTypeRelatedTo(source: Type, target: Type, relation: Relation) {
         if (isFreshLiteralType(source)) {
             source = (source as FreshableType).regularType;
         }
@@ -20341,7 +20342,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         if (source.flags & TypeFlags.Object && target.flags & TypeFlags.Object) {
             const related = relation.get(getRelationKey(source, target, IntersectionState.None, relation, /*ignoreConstraints*/ false));
             if (related !== undefined) {
-                return !!(related & RelationComparisonResult.Succeeded);
+                return !!(related.result & RelationComparisonResult.Succeeded);
             }
         }
         if (source.flags & TypeFlags.StructuredOrInstantiable || target.flags & TypeFlags.StructuredOrInstantiable) {
@@ -20402,7 +20403,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
     function checkTypeRelatedTo(
         source: Type,
         target: Type,
-        relation: Map<string, RelationComparisonResult>,
+        relation: Relation,
         errorNode: Node | undefined,
         headMessage?: DiagnosticMessage,
         containingMessageChain?: () => DiagnosticMessageChain | undefined,
@@ -20424,8 +20425,8 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         let incompatibleStack: DiagnosticAndArguments[] | undefined;
         let sourceOneOfTypeMapper: TypeMapper | undefined;
         let targetOneOfTypeMapper: TypeMapper | undefined;
-        let newSourceOneOfs: OneOfType[];
-        let newTargetOneOfs: OneOfType[];
+        let newSourceOneOfs: Set<OneOfType>;
+        let newTargetOneOfs: Set<OneOfType>;
 
         Debug.assert(relation !== identityRelation || !errorNode, "no error reporting in identity checking");
 
@@ -21213,21 +21214,21 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             return instantiations.map(instantiation => makeArrayTypeMapper(oneOfs, instantiation));
         }
 
-        function extendOneOfTypeMappers(existingMappers: (TypeMapper | undefined)[], newOneOfs: OneOfType[]) {
-            if (newOneOfs.length === 0) {
+        function extendOneOfTypeMappers(existingMappers: (TypeMapper | undefined)[], newOneOfs: Set<OneOfType>) {
+            if (newOneOfs.size === 0) {
                 return existingMappers;
             }
 
-            const newMappers = generateOneOfTypeMappers(newOneOfs);
+            const newMappers = generateOneOfTypeMappers([...newOneOfs]);
 
             return existingMappers.flatMap(mapper1 => newMappers.map(mapper2 => mergeTypeMappers(mapper1, mapper2)));
         }
 
-        function getOneOfSubstitution(oneOf: OneOfType, mapper: TypeMapper | undefined, newList: OneOfType[]) {
+        function getOneOfSubstitution(oneOf: OneOfType, mapper: TypeMapper | undefined, newOneOfs: Set<OneOfType>) {
             let mappedType: Type;
 
             if (!mapper || (mappedType = getMappedType(oneOf, mapper)) === oneOf) {
-                newList.push(oneOf);
+                newOneOfs.add(oneOf);
                 return oneOf.origin.types[0];
             }
 
@@ -21264,13 +21265,13 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                     // Only keep the last error.
                     resetErrorInfo(saveErrorInfo);
 
-                    newSourceOneOfs = [];
-                    newTargetOneOfs = [];
-
-                    const related = structuredTypeRelatedTo(source, target, reportErrors, intersectionState);
+                    const related = isRelatedTo(source, target, RecursionFlags.None, reportErrors, /*headMessage*/ undefined, intersectionState);
 
                     sourceMappers = extendOneOfTypeMappers(sourceMappers, newSourceOneOfs);
                     targetMappers = extendOneOfTypeMappers(targetMappers, newTargetOneOfs);
+
+                    newSourceOneOfs.clear();
+                    newTargetOneOfs.clear();
 
                     if (related) {
                         intermediateResult = related;
@@ -21368,16 +21369,20 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 return Ternary.False;
             }
             const id = getRelationKey(source, target, intersectionState, relation, /*ignoreConstraints*/ false, oneOfRoot, sourceOneOfTypeMapper, targetOneOfTypeMapper);
+            console.log("cache id", id, getTypeNameForErrorDisplay(source), getTypeNameForErrorDisplay(target));
             const entry = relation.get(id);
+            if (entry) {
+                console.log("cache hit", entry);
+            }
             if (entry !== undefined) {
-                if (reportErrors && entry & RelationComparisonResult.Failed && !(entry & RelationComparisonResult.Reported)) {
+                if (reportErrors && entry.result & RelationComparisonResult.Failed && !(entry.result & RelationComparisonResult.Reported)) {
                     // We are elaborating errors and the cached result is an unreported failure. The result will be reported
                     // as a failure, and should be updated as a reported failure by the bottom of this function.
                 }
                 else {
                     if (outofbandVarianceMarkerHandler) {
                         // We're in the middle of variance checking - integrate any unmeasurable/unreliable flags from this cached component
-                        const saved = entry & RelationComparisonResult.ReportsMask;
+                        const saved = entry.result & RelationComparisonResult.ReportsMask;
                         if (saved & RelationComparisonResult.ReportsUnmeasurable) {
                             instantiateType(source, reportUnmeasurableMapper);
                         }
@@ -21385,7 +21390,13 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                             instantiateType(source, reportUnreliableMapper);
                         }
                     }
-                    return entry & RelationComparisonResult.Succeeded ? Ternary.True : Ternary.False;
+                    for (const oneOf of entry.newSourceOneOfs) {
+                        newSourceOneOfs.add(oneOf);
+                    }
+                    for (const oneOf of entry.newTargetOneOfs) {
+                        newTargetOneOfs.add(oneOf);
+                    }
+                    return entry.result & RelationComparisonResult.Succeeded ? Ternary.True : Ternary.False;
                 }
             }
             if (!maybeKeys) {
@@ -21409,6 +21420,12 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                     return Ternary.False;
                 }
             }
+
+            const saveNewSourceOneOfs = newSourceOneOfs;
+            const saveNewTargetOneOfs = newTargetOneOfs;
+            newSourceOneOfs = new Set<OneOfType>();
+            newTargetOneOfs = new Set<OneOfType>();
+
             const maybeStart = maybeCount;
             maybeKeys[maybeCount] = id;
             maybeCount++;
@@ -21469,7 +21486,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                         // If result is definitely true, record all maybe keys as having succeeded. Also, record Ternary.Maybe
                         // results as having succeeded once we reach depth 0, but never record Ternary.Unknown results.
                         for (let i = maybeStart; i < maybeCount; i++) {
-                            relation.set(maybeKeys[i], RelationComparisonResult.Succeeded | propagatingVarianceFlags);
+                            relation.set(maybeKeys[i], { result: RelationComparisonResult.Succeeded | propagatingVarianceFlags, newSourceOneOfs, newTargetOneOfs });
                         }
                     }
                     maybeCount = maybeStart;
@@ -21478,9 +21495,17 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             else {
                 // A false result goes straight into global cache (when something is false under
                 // assumptions it will also be false without assumptions)
-                relation.set(id, (reportErrors ? RelationComparisonResult.Reported : 0) | RelationComparisonResult.Failed | propagatingVarianceFlags);
+                relation.set(id, { result: (reportErrors ? RelationComparisonResult.Reported : 0) | RelationComparisonResult.Failed | propagatingVarianceFlags, newSourceOneOfs, newTargetOneOfs });
                 maybeCount = maybeStart;
             }
+            for (const oneOf of newSourceOneOfs) {
+                saveNewSourceOneOfs.add(oneOf);
+            }
+            for (const oneOf of newTargetOneOfs) {
+                saveNewTargetOneOfs.add(oneOf);
+            }
+            newSourceOneOfs = saveNewSourceOneOfs;
+            newTargetOneOfs = saveNewTargetOneOfs;
             return result;
         }
 
@@ -23142,8 +23167,10 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         }
 
         switch (mapper.kind) {
+            case TypeMapKind.Simple:
+                return `${mapper.source.id}=${mapper.target.id}`;
             case TypeMapKind.Array:
-                return mapper.sources.map((oneOf, i) => `${oneOf.id}=${mapper.targets![i].id}`).join(",");
+                return zipWith(mapper.sources, mapper.targets!, (s, t) => `${s.id}=${t.id}`).join(",");
             case TypeMapKind.Merged:
                 return `${getRelationKeyTypeMapperSuffix(mapper.mapper1)},${getRelationKeyTypeMapperSuffix(mapper.mapper2)}`;
             default:
@@ -23155,7 +23182,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
      * To improve caching, the relation key for two generic types uses the target's id plus ids of the type parameters.
      * For other cases, the types ids are used.
      */
-    function getRelationKey(source: Type, target: Type, intersectionState: IntersectionState, relation: Map<string, RelationComparisonResult>, ignoreConstraints: boolean, oneOfRoot = true, sourceOneOfTypeMapper?: TypeMapper, targetOneOfTypeMapper?: TypeMapper) {
+    function getRelationKey(source: Type, target: Type, intersectionState: IntersectionState, relation: Relation, ignoreConstraints: boolean, oneOfRoot = true, sourceOneOfTypeMapper?: TypeMapper, targetOneOfTypeMapper?: TypeMapper) {
         if (relation === identityRelation && source.id > target.id) {
             const temp = source;
             source = target;
@@ -32878,7 +32905,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
     function checkApplicableSignatureForJsxOpeningLikeElement(
         node: JsxOpeningLikeElement,
         signature: Signature,
-        relation: Map<string, RelationComparisonResult>,
+        relation: Relation,
         checkMode: CheckMode,
         reportErrors: boolean,
         containingMessageChain: (() => DiagnosticMessageChain | undefined) | undefined,
@@ -32981,7 +33008,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         node: CallLikeExpression,
         args: readonly Expression[],
         signature: Signature,
-        relation: Map<string, RelationComparisonResult>,
+        relation: Relation,
         checkMode: CheckMode,
         reportErrors: boolean,
         containingMessageChain: (() => DiagnosticMessageChain | undefined) | undefined,
@@ -33575,7 +33602,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             candidateForTypeArgumentError = oldCandidateForTypeArgumentError;
         }
 
-        function chooseOverload(candidates: Signature[], relation: Map<string, RelationComparisonResult>, isSingleNonGenericCandidate: boolean, signatureHelpTrailingComma = false) {
+        function chooseOverload(candidates: Signature[], relation: Relation, isSingleNonGenericCandidate: boolean, signatureHelpTrailingComma = false) {
             candidatesForArgumentError = undefined;
             candidateForArgumentArityError = undefined;
             candidateForTypeArgumentError = undefined;

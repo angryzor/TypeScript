@@ -910,6 +910,15 @@ export const enum RelationComparisonResult {
 }
 
 /** @internal */
+export interface RelationEntry {
+    result: RelationComparisonResult
+    newSourceOneOfs: Set<OneOfType>
+    newTargetOneOfs: Set<OneOfType>
+}
+
+export type Relation = Map<string, RelationEntry>
+
+/** @internal */
 export type NodeId = number;
 
 export interface Node extends ReadonlyTextRange {
