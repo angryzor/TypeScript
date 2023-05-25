@@ -21680,12 +21680,14 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 sourceOneOfContext.inOneOfContext = true;
                 result = eachOneOfInstantiationRelatedToType(source, target, reportErrors, intersectionState);
                 sourceOneOfContext.inOneOfContext = false;
+                overrideNextErrorInfo++;
                 return result;
             }
             if (!targetOneOfContext.inOneOfContext) {
                 targetOneOfContext.inOneOfContext = true;
                 result = typeRelatedToSomeOneOfInstantiation(source, target, reportErrors, intersectionState);
                 targetOneOfContext.inOneOfContext = false;
+                overrideNextErrorInfo++;
                 return result;
             }
             if (source.flags & TypeFlags.AllOf) {
