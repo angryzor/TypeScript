@@ -927,13 +927,13 @@ export interface OneOfScope {
 /** @internal */
 export interface OneOfMappingContext {
     mappedOneOfs: Set<OneOfType>;
-    mapper: TypeMapper;
+    mappers: (TypeMapper | undefined)[];
 }
 
 /** @internal */
 export interface OneOfMappingScope {
-    sourceContext: OneOfMappingContext;
-    targetContext: OneOfMappingContext;
+    sourceMapper: TypeMapper | undefined;
+    targetMapper: TypeMapper | undefined;
 }
 
 /** @internal */

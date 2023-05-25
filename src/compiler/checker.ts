@@ -20428,14 +20428,15 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         let overrideNextErrorInfo = 0; // How many `reportRelationError` calls should be skipped in the elaboration pyramid
         let lastSkippedInfo: [Type, Type] | undefined;
         let incompatibleStack: DiagnosticAndArguments[] | undefined;
-        let sourceOneOfTypeMapper: TypeMapper | undefined;
-        let targetOneOfTypeMapper: TypeMapper | undefined;
         let oneOfScope: OneOfScope;
+        let oneOfMappingScope: OneOfMappingScope;
         let logindent = "";
 
         Debug.assert(relation !== identityRelation || !errorNode, "no error reporting in identity checking");
 
+        console.log("=============== START TOP LEVEL QUERY ===============")
         const result = isRelatedTo(source, target, RecursionFlags.Both, /*reportErrors*/ !!errorNode, headMessage, IntersectionState.None, /*oneOfRoot*/ true);
+        console.log("=============== END TOP LEVEL QUERY ===============")
         if (incompatibleStack) {
             reportIncompatibleStack();
         }
@@ -21213,22 +21214,6 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             }
         }
 
-        function generateOneOfTypeMappers(oneOfs: OneOfType[]) {
-            const instantiations = cartesianProduct(oneOfs.map(oneOf => oneOf.origin.types));
-
-            return instantiations.map(instantiation => makeArrayTypeMapper(oneOfs, instantiation));
-        }
-
-        function extendOneOfTypeMappers(existingMappers: (TypeMapper | undefined)[], environment: OneOfEnvironment) {
-            if (environment.size === 0) {
-                return existingMappers;
-            }
-
-            const newMappers = generateOneOfTypeMappers([...environment.keys()]);
-
-            return existingMappers.flatMap(mapper1 => newMappers.map(mapper2 => mergeTypeMappers(mapper1, mapper2)));
-        }
-
         function getOneOfSubstitution(oneOf: OneOfType, mapper: TypeMapper | undefined, environment: OneOfEnvironment) {
             let mappedType!: Type;
 
@@ -21246,20 +21231,16 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 console.log(logindent, "NO MAPPER:", oneOf.id);
             }
 
-            discoverOneOf(oneOf, environment);
+            environment.set(oneOf, OneOfEnvironmentRole.Free);
             return oneOf.origin.types[oneOf.origin.types.length - 1];
         }
 
-        function discoverOneOf(oneOf: OneOfType, environment: OneOfEnvironment) {
-            environment.set(oneOf, OneOfEnvironmentRole.Free);
-        }
-
         function getSourceOneOfSubstitution(oneOf: OneOfType) {
-            return getOneOfSubstitution(oneOf, sourceOneOfTypeMapper, oneOfScope.sourceOneOfs);
+            return getOneOfSubstitution(oneOf, oneOfMappingScope.sourceMapper, oneOfScope.sourceOneOfs);
         }
 
         function getTargetOneOfSubstitution(oneOf: OneOfType) {
-            return getOneOfSubstitution(oneOf, targetOneOfTypeMapper, oneOfScope.targetOneOfs);
+            return getOneOfSubstitution(oneOf, oneOfMappingScope.targetMapper, oneOfScope.targetOneOfs);
         }
 
         function createOneOfEnvironment(): OneOfEnvironment {
@@ -21278,7 +21259,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
 
         function pushOneOfScope(): OneOfScope {
             console.log(logindent, "ENTERING ONEOF SCOPE");
-            logindent += "  ";
+            logindent += "    ";
             const savedScope = oneOfScope;
 
             oneOfScope = createOneOfScope();
@@ -21292,8 +21273,8 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             oneOfScope = parentScope;
 
             mergeOneOfScope(childScope, capture);
-            logindent = logindent.slice(0, logindent.length - 2);
-            console.log(logindent, "LEAVING ONEOF SCOPE");
+            logindent = logindent.slice(0, logindent.length - 4);
+            console.log(logindent, `LEAVING ONEOF SCOPE${capture ? " (CAPTURED)" : ""}`, [...childScope.sourceOneOfs].map(([o, c]) => [o.id, c]), [...childScope.targetOneOfs].map(([o, c]) => [o.id, c]));
         }
 
         function peekOneOfScope() {
@@ -21306,19 +21287,65 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         }
 
         function createOneOfMappingContext(): OneOfMappingContext {
-            return { mappedOneOfs: new Set<OneOfType>(), mapper: undefined };
+            return { mappedOneOfs: new Set<OneOfType>(), mappers: [undefined] };
         }
 
-        function createOneOfMappingScope(): OneOfMappingScope {
-            return { sourceContext: createOneOfMappingContext(), targetContext: createOneOfMappingContext() };
+        function generateOneOfTypeMappers(oneOfs: OneOfType[]) {
+            const instantiations = cartesianProduct(oneOfs.map(oneOf => oneOf.origin.types));
+
+            return instantiations.map(instantiation => makeArrayTypeMapper(oneOfs, instantiation));
         }
 
-        function pushOneOfMappingScope(scope: OneOfMappingScope) {
+        function mapUnmappedFreeOneOfs(context: OneOfMappingContext, environment: OneOfEnvironment) {
+            const newFreeOneOfs = [...environment]
+                .filter(([oneOf, role]) => role === OneOfEnvironmentRole.Free && !context.mappedOneOfs.has(oneOf))
+                .map(([oneOf]) => oneOf);
+
+            if (newFreeOneOfs.length === 0) {
+                return false;
+            }
+
+            console.log(logindent, "NEW FREE ONEOFS:", newFreeOneOfs.map(x => x.id));
+
+            const newMappers = generateOneOfTypeMappers(newFreeOneOfs);
+
+            for (const oneOf of newFreeOneOfs) {
+                context.mappedOneOfs.add(oneOf);
+            }
+
+            context.mappers = context.mappers.flatMap(mapper1 => newMappers.map(mapper2 => mergeTypeMappers(mapper1, mapper2)));
+
+            return true;
+        }
+
+        function getCurrentOneOfMapper(context: OneOfMappingContext) {
+            return context.mappers[context.mappers.length - 1];
+        }
+
+        function hasPendingOneOfMappers(context: OneOfMappingContext) {
+            return context.mappers.length > 0;
+        }
+
+        function nextOneOfMapper(context: OneOfMappingContext) {
+            return context.mappers.pop();
+        }
+
+        function createOneOfMappingScope(sourceMapper?: TypeMapper | undefined, targetMapper?: TypeMapper | undefined): OneOfMappingScope {
+            return { sourceMapper, targetMapper };
+        }
+
+        function pushOneOfMappingScope(sourceMapper: TypeMapper | undefined, targetMapper: TypeMapper | undefined) {
             console.log(logindent, "ENTERING ONEOF MAPPING SCOPE");
-            logindent += "  ";
+            console.log(logindent, "SOURCE MAPPER:", sourceMapper && getTypeMapperMappingsForErrorDisplay(sourceMapper));
+            console.log(logindent, "TARGET MAPPER:", targetMapper && getTypeMapperMappingsForErrorDisplay(targetMapper));
+            logindent += "    ";
+
             const savedScope = oneOfMappingScope;
 
-            oneOfMappingScope = createOneOfMappingScope();
+            oneOfMappingScope = createOneOfMappingScope(
+                sourceMapper ? mergeTypeMappers(savedScope.sourceMapper, sourceMapper) : savedScope.sourceMapper,
+                targetMapper ? mergeTypeMappers(savedScope.targetMapper, targetMapper) : savedScope.targetMapper,
+            );
 
             return savedScope;
         }
@@ -21326,51 +21353,37 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         function popOneOfMappingScope(parentScope: OneOfMappingScope) {
             oneOfMappingScope = parentScope;
 
-            logindent = logindent.slice(0, logindent.length - 2);
-            console.log(logindent, "LEAVING ONEOF SCOPE");
+            logindent = logindent.slice(0, logindent.length - 4);
+            console.log(logindent, "LEAVING ONEOF MAPPING SCOPE");
         }
 
         function structuredTypeRelatedToOneOf(source: Type, target: Type, reportErrors = false, intersectionState = IntersectionState.None): Ternary {
             const parentScope = pushOneOfScope();
-
-            const sourceParentMapper = sourceOneOfTypeMapper;
-            const targetParentMapper = targetOneOfTypeMapper;
-
-            let sourceMappers: (TypeMapper | undefined)[] = [undefined];
-
+            const sourceMappingContext = createOneOfMappingContext();
             let result = Ternary.True;
-            while (sourceMappers.length > 0) {
-                let targetMappers: (TypeMapper | undefined)[] = [undefined];
+
+            while (hasPendingOneOfMappers(sourceMappingContext)) {
+                const targetMappingContext = createOneOfMappingContext();
                 const saveErrorInfo = captureErrorCalculationState();
                 let intermediateResult = Ternary.False;
 
-                while (targetMappers.length > 0) {
-                    const sourceMapper = sourceMappers[sourceMappers.length - 1];
-                    const targetMapper = targetMappers[targetMappers.length - 1];
-
-                    console.log(logindent, "SOURCE MAPPER:", sourceMapper && getTypeMapperMappingsForErrorDisplay(sourceMapper));
-                    console.log(logindent, "TARGET MAPPER:", targetMapper && getTypeMapperMappingsForErrorDisplay(targetMapper));
-
-                    sourceOneOfTypeMapper = sourceMapper ? mergeTypeMappers(sourceParentMapper, sourceMapper) : sourceParentMapper;
-                    targetOneOfTypeMapper = targetMapper ? mergeTypeMappers(targetParentMapper, targetMapper) : targetParentMapper;
+                while (hasPendingOneOfMappers(targetMappingContext)) {
+                    const sourceMapper = getCurrentOneOfMapper(sourceMappingContext);
+                    const targetMapper = getCurrentOneOfMapper(targetMappingContext);
 
                     // Only keep the last error.
                     resetErrorInfo(saveErrorInfo);
 
-                    const parentScope = pushOneOfScope();
-                    const childScope = peekOneOfScope();
+                    const parentMappingScope = pushOneOfMappingScope(sourceMapper, targetMapper);
 
                     const related = isRelatedTo(source, target, RecursionFlags.None, reportErrors, /*headMessage*/ undefined, intersectionState);
 
-                    popOneOfScope(parentScope);
+                    popOneOfMappingScope(parentMappingScope);
 
-                    if (childScope.sourceOneOfs.size > 0 || childScope.targetOneOfs.size > 0) {
-                        console.log(logindent, "NEW SOURCE ONEOFS:", [...childScope.sourceOneOfs.keys()].map(x => x.id));
-                        console.log(logindent, "NEW TARGET ONEOFS:", [...childScope.targetOneOfs.keys()].map(x => x.id));
+                    const foundNewSourceOneOfs = mapUnmappedFreeOneOfs(sourceMappingContext, oneOfScope.sourceOneOfs);
+                    const foundNewTargetOneOfs = mapUnmappedFreeOneOfs(targetMappingContext, oneOfScope.targetOneOfs);
 
-                        sourceMappers = extendOneOfTypeMappers(sourceMappers, childScope.sourceOneOfs);
-                        targetMappers = extendOneOfTypeMappers(targetMappers, childScope.targetOneOfs);
-
+                    if (foundNewSourceOneOfs || foundNewTargetOneOfs) {
                         continue;
                     }
 
@@ -21379,7 +21392,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                         break;
                     }
 
-                    targetMappers.pop();
+                    nextOneOfMapper(targetMappingContext);
 
                     if (reportErrors) {
                         reportSubstitutions(target, targetMapper);
@@ -21392,13 +21405,10 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                     break;
                 }
 
-                sourceMappers.pop();
+                nextOneOfMapper(sourceMappingContext);
 
                 result &= intermediateResult;
             }
-
-            sourceOneOfTypeMapper = sourceParentMapper;
-            targetOneOfTypeMapper = targetParentMapper;
 
             popOneOfScope(parentScope, /*capture*/ true);
 
@@ -21473,12 +21483,13 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             }
             if (!oneOfScope) {
                 oneOfScope = createOneOfScope();
+                oneOfMappingScope = createOneOfMappingScope();
             }
-            const id = getRelationKey(source, target, intersectionState, relation, /*ignoreConstraints*/ false, oneOfRoot, sourceOneOfTypeMapper, targetOneOfTypeMapper);
+            const id = getRelationKey(source, target, intersectionState, relation, /*ignoreConstraints*/ false, oneOfRoot, oneOfMappingScope.sourceMapper, oneOfMappingScope.targetMapper);
             console.log(logindent, "cache id", id, getTypeNameForErrorDisplay(source), getTypeNameForErrorDisplay(target));
             const entry = relation.get(id);
             if (entry) {
-                console.log(logindent, "cache hit", entry.result, [...entry.oneOfScope.sourceOneOfs].map(o => o.id), [...entry.oneOfScope.targetOneOfs].map(o => o.id));
+                console.log(logindent, "cache hit", entry.result, [...entry.oneOfScope.sourceOneOfs].map(([o, c]) => [o.id, c]), [...entry.oneOfScope.targetOneOfs].map(([o, c]) => [o.id, c]));
             }
             if (entry !== undefined) {
                 if (reportErrors && entry.result & RelationComparisonResult.Failed && !(entry.result & RelationComparisonResult.Reported)) {
@@ -21509,7 +21520,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 // A key that starts with "*" is an indication that we have type references that reference constrained
                 // type parameters. For such keys we also check against the key we would have gotten if all type parameters
                 // were unconstrained.
-                const broadestEquivalentId = id.startsWith("*") ? getRelationKey(source, target, intersectionState, relation, /*ignoreConstraints*/ true, oneOfRoot, sourceOneOfTypeMapper, targetOneOfTypeMapper) : undefined;
+                const broadestEquivalentId = id.startsWith("*") ? getRelationKey(source, target, intersectionState, relation, /*ignoreConstraints*/ true, oneOfRoot, oneOfMappingScope.sourceMapper, oneOfMappingScope.targetMapper) : undefined;
                 for (let i = 0; i < maybeCount; i++) {
                     // If source and target are already being compared, consider them related with assumptions
                     if (id === maybeKeys[i] || broadestEquivalentId && broadestEquivalentId === maybeKeys[i]) {
