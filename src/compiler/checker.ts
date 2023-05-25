@@ -1304,6 +1304,11 @@ const enum ExpandingFlags {
     Both = Source | Target,
 }
 
+interface OneOfScope {
+    sourceOneOfs: Set<OneOfType>
+    targetOneOfs: Set<OneOfType>
+}
+
 const enum MembersOrExportsResolutionKind {
     resolvedExports = "resolvedExports",
     resolvedMembers = "resolvedMembers"
@@ -20425,8 +20430,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         let incompatibleStack: DiagnosticAndArguments[] | undefined;
         let sourceOneOfTypeMapper: TypeMapper | undefined;
         let targetOneOfTypeMapper: TypeMapper | undefined;
-        let newSourceOneOfs: Set<OneOfType>;
-        let newTargetOneOfs: Set<OneOfType>;
+        let oneOfScope: OneOfScope;
 
         Debug.assert(relation !== identityRelation || !errorNode, "no error reporting in identity checking");
 
@@ -21229,7 +21233,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
 
             if (!mapper || (mappedType = getMappedType(oneOf, mapper)) === oneOf) {
                 newOneOfs.add(oneOf);
-                return oneOf.origin.types[0];
+                return oneOf.origin.types[oneOf.origin.types.length - 1];
             }
 
             return mappedType;
@@ -21243,6 +21247,10 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             return getOneOfSubstitution(oneOf, targetOneOfTypeMapper, newTargetOneOfs);
         }
 
+        function pushOneOfScope(): OneOfScope {
+
+        }
+
         function structuredTypeRelatedToOneOf(source: Type, target: Type, reportErrors = false, intersectionState = IntersectionState.None): Ternary {
             const sourceParentMapper = sourceOneOfTypeMapper;
             const targetParentMapper = targetOneOfTypeMapper;
@@ -21251,34 +21259,53 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
 
             let result = Ternary.True;
             while (sourceMappers.length > 0) {
-                const sourceMapper = sourceMappers[0];
-                sourceOneOfTypeMapper = sourceMapper ? mergeTypeMappers(sourceParentMapper, sourceMapper) : sourceParentMapper;
 
                 let targetMappers: (TypeMapper | undefined)[] = [undefined];
                 const saveErrorInfo = captureErrorCalculationState();
                 let intermediateResult = Ternary.False;
 
                 while (targetMappers.length > 0) {
-                    const targetMapper = targetMappers[0];
+                    const sourceMapper = sourceMappers[sourceMappers.length - 1];
+                    const targetMapper = targetMappers[targetMappers.length - 1];
+                    sourceOneOfTypeMapper = sourceMapper ? mergeTypeMappers(sourceParentMapper, sourceMapper) : sourceParentMapper;
                     targetOneOfTypeMapper = targetMapper ? mergeTypeMappers(targetParentMapper, targetMapper) : targetParentMapper;
 
                     // Only keep the last error.
                     resetErrorInfo(saveErrorInfo);
 
+                    const saveNewSourceOneOfs = newSourceOneOfs;
+                    const saveNewTargetOneOfs = newTargetOneOfs;
+                    newSourceOneOfs = new Set<OneOfType>();
+                    newTargetOneOfs = new Set<OneOfType>();
+
                     const related = isRelatedTo(source, target, RecursionFlags.None, reportErrors, /*headMessage*/ undefined, intersectionState);
+
+                    const childNewSourceOneOfs = newSourceOneOfs;
+                    const childNewTargetOneOfs = newTargetOneOfs;
 
                     sourceMappers = extendOneOfTypeMappers(sourceMappers, newSourceOneOfs);
                     targetMappers = extendOneOfTypeMappers(targetMappers, newTargetOneOfs);
 
-                    newSourceOneOfs.clear();
-                    newTargetOneOfs.clear();
+                    for (const oneOf of newSourceOneOfs) {
+                        saveNewSourceOneOfs.add(oneOf);
+                    }
+                    for (const oneOf of newTargetOneOfs) {
+                        saveNewTargetOneOfs.add(oneOf);
+                    }
+
+                    newSourceOneOfs = saveNewSourceOneOfs;
+                    newTargetOneOfs = saveNewTargetOneOfs;
+
+                    if (childNewSourceOneOfs.size > 0 || childNewTargetOneOfs.size > 0) {
+                        continue;
+                    }
 
                     if (related) {
                         intermediateResult = related;
                         break;
                     }
 
-                    targetMappers = targetMappers.slice(1);
+                    targetMappers.pop();
 
                     if (reportErrors) {
                         reportSubstitutions(target, targetMapper);
@@ -21291,7 +21318,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                     break;
                 }
 
-                sourceMappers = sourceMappers.slice(1);
+                sourceMappers.pop();
 
                 result &= intermediateResult;
             }
@@ -21367,6 +21394,10 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         function recursiveTypeRelatedTo(source: Type, target: Type, reportErrors: boolean, intersectionState: IntersectionState, recursionFlags: RecursionFlags, oneOfRoot: boolean): Ternary {
             if (overflow) {
                 return Ternary.False;
+            }
+            if (!newSourceOneOfs) {
+                newSourceOneOfs = new Set<OneOfType>();
+                newTargetOneOfs = new Set<OneOfType>();
             }
             const id = getRelationKey(source, target, intersectionState, relation, /*ignoreConstraints*/ false, oneOfRoot, sourceOneOfTypeMapper, targetOneOfTypeMapper);
             console.log("cache id", id, getTypeNameForErrorDisplay(source), getTypeNameForErrorDisplay(target));
