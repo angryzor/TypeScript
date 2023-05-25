@@ -916,8 +916,6 @@ export interface RelationEntry {
     newTargetOneOfs: Set<OneOfType>
 }
 
-export type Relation = Map<string, RelationEntry>
-
 /** @internal */
 export type NodeId = number;
 

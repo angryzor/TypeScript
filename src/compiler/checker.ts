@@ -913,8 +913,8 @@ import {
     rangeOfTypeParameters,
     ReadonlyKeyword,
     reduceLeft,
-    Relation,
     RelationComparisonResult,
+    RelationEntry,
     relativeComplement,
     removeExtension,
     removePrefix,
@@ -2198,11 +2198,11 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
     var _jsxNamespace: __String;
     var _jsxFactoryEntity: EntityName | undefined;
 
-    var subtypeRelation = new Relation();
-    var strictSubtypeRelation = new Relation();
-    var assignableRelation = new Relation();
-    var comparableRelation = new Relation();
-    var identityRelation = new Relation();
+    var subtypeRelation = new Map<string, RelationEntry>();
+    var strictSubtypeRelation = new Map<string, RelationEntry>();
+    var assignableRelation = new Map<string, RelationEntry>();
+    var comparableRelation = new Map<string, RelationEntry>();
+    var identityRelation = new Map<string, RelationEntry>();
     var enumRelation = new Map<string, RelationComparisonResult>();
 
     var builtinGlobals = createSymbolTable();
@@ -19449,7 +19449,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
     function checkTypeRelatedToAndOptionallyElaborate(
         source: Type,
         target: Type,
-        relation: Relation,
+        relation: Map<string, RelationEntry>,
         errorNode: Node | undefined,
         expr: Expression | undefined,
         headMessage: DiagnosticMessage | undefined,
@@ -19471,7 +19471,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         node: Expression | undefined,
         source: Type,
         target: Type,
-        relation: Relation,
+        relation: Map<string, RelationEntry>,
         headMessage: DiagnosticMessage | undefined,
         containingMessageChain: (() => DiagnosticMessageChain | undefined) | undefined,
         errorOutputContainer: { errors?: Diagnostic[], skipLogging?: boolean } | undefined
@@ -19508,7 +19508,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         node: Expression,
         source: Type,
         target: Type,
-        relation: Relation,
+        relation: Map<string, RelationEntry>,
         headMessage: DiagnosticMessage | undefined,
         containingMessageChain: (() => DiagnosticMessageChain | undefined) | undefined,
         errorOutputContainer: { errors?: Diagnostic[], skipLogging?: boolean } | undefined
@@ -19537,7 +19537,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         node: ArrowFunction,
         source: Type,
         target: Type,
-        relation: Relation,
+        relation: Map<string, RelationEntry>,
         containingMessageChain: (() => DiagnosticMessageChain | undefined) | undefined,
         errorOutputContainer: { errors?: Diagnostic[], skipLogging?: boolean } | undefined
     ): boolean {
@@ -19621,7 +19621,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         iterator: ElaborationIterator,
         source: Type,
         target: Type,
-        relation: Relation,
+        relation: Map<string, RelationEntry>,
         containingMessageChain: (() => DiagnosticMessageChain | undefined) | undefined,
         errorOutputContainer: { errors?: Diagnostic[], skipLogging?: boolean } | undefined
     ) {
@@ -19698,7 +19698,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         iterator: ElaborationIterator,
         source: Type,
         target: Type,
-        relation: Relation,
+        relation: Map<string, RelationEntry>,
         containingMessageChain: (() => DiagnosticMessageChain | undefined) | undefined,
         errorOutputContainer: { errors?: Diagnostic[], skipLogging?: boolean } | undefined
     ) {
@@ -19801,7 +19801,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         node: JsxAttributes,
         source: Type,
         target: Type,
-        relation: Relation,
+        relation: Map<string, RelationEntry>,
         containingMessageChain: (() => DiagnosticMessageChain | undefined) | undefined,
         errorOutputContainer: { errors?: Diagnostic[], skipLogging?: boolean } | undefined
     ) {
@@ -19912,7 +19912,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         node: ArrayLiteralExpression,
         source: Type,
         target: Type,
-        relation: Relation,
+        relation: Map<string, RelationEntry>,
         containingMessageChain: (() => DiagnosticMessageChain | undefined) | undefined,
         errorOutputContainer: { errors?: Diagnostic[], skipLogging?: boolean } | undefined
     ) {
@@ -19959,7 +19959,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         node: ObjectLiteralExpression,
         source: Type,
         target: Type,
-        relation: Relation,
+        relation: Map<string, RelationEntry>,
         containingMessageChain: (() => DiagnosticMessageChain | undefined) | undefined,
         errorOutputContainer: { errors?: Diagnostic[], skipLogging?: boolean } | undefined
     ) {
@@ -20275,7 +20275,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         return true;
     }
 
-    function isSimpleTypeRelatedTo(source: Type, target: Type, relation: Relation, errorReporter?: ErrorReporter) {
+    function isSimpleTypeRelatedTo(source: Type, target: Type, relation: Map<string, RelationEntry>, errorReporter?: ErrorReporter) {
         const s = source.flags;
         const t = target.flags;
         if (t & TypeFlags.Any || s & TypeFlags.Never || source === wildcardType) return true;
@@ -20319,7 +20319,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         return false;
     }
 
-    function isTypeRelatedTo(source: Type, target: Type, relation: Relation) {
+    function isTypeRelatedTo(source: Type, target: Type, relation: Map<string, RelationEntry>) {
         if (isFreshLiteralType(source)) {
             source = (source as FreshableType).regularType;
         }
@@ -20403,7 +20403,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
     function checkTypeRelatedTo(
         source: Type,
         target: Type,
-        relation: Relation,
+        relation: Map<string, RelationEntry>,
         errorNode: Node | undefined,
         headMessage?: DiagnosticMessage,
         containingMessageChain?: () => DiagnosticMessageChain | undefined,
@@ -23182,7 +23182,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
      * To improve caching, the relation key for two generic types uses the target's id plus ids of the type parameters.
      * For other cases, the types ids are used.
      */
-    function getRelationKey(source: Type, target: Type, intersectionState: IntersectionState, relation: Relation, ignoreConstraints: boolean, oneOfRoot = true, sourceOneOfTypeMapper?: TypeMapper, targetOneOfTypeMapper?: TypeMapper) {
+    function getRelationKey(source: Type, target: Type, intersectionState: IntersectionState, relation: Map<string, RelationEntry>, ignoreConstraints: boolean, oneOfRoot = true, sourceOneOfTypeMapper?: TypeMapper, targetOneOfTypeMapper?: TypeMapper) {
         if (relation === identityRelation && source.id > target.id) {
             const temp = source;
             source = target;
@@ -32905,7 +32905,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
     function checkApplicableSignatureForJsxOpeningLikeElement(
         node: JsxOpeningLikeElement,
         signature: Signature,
-        relation: Relation,
+        relation: Map<string, RelationEntry>,
         checkMode: CheckMode,
         reportErrors: boolean,
         containingMessageChain: (() => DiagnosticMessageChain | undefined) | undefined,
@@ -33008,7 +33008,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         node: CallLikeExpression,
         args: readonly Expression[],
         signature: Signature,
-        relation: Relation,
+        relation: Map<string, RelationEntry>,
         checkMode: CheckMode,
         reportErrors: boolean,
         containingMessageChain: (() => DiagnosticMessageChain | undefined) | undefined,
@@ -33602,7 +33602,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             candidateForTypeArgumentError = oldCandidateForTypeArgumentError;
         }
 
-        function chooseOverload(candidates: Signature[], relation: Relation, isSingleNonGenericCandidate: boolean, signatureHelpTrailingComma = false) {
+        function chooseOverload(candidates: Signature[], relation: Map<string, RelationEntry>, isSingleNonGenericCandidate: boolean, signatureHelpTrailingComma = false) {
             candidatesForArgumentError = undefined;
             candidateForArgumentArityError = undefined;
             candidateForTypeArgumentError = undefined;
