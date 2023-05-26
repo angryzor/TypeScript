@@ -21351,7 +21351,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             console.log(logindent, "LEAVING ONEOF MAPPING SCOPE");
         }
 
-        function eachOneOfInstantiationRelatedToType(source: Type, target: Type, reportErrors = false, intersectionState = IntersectionState.None): Ternary {
+        function eachOneOfInstantiationRelatedToType(source: Type, target: Type, reportErrors = false, intersectionState = IntersectionState.None, capturingRoot: Type = freeOneOfRootType): Ternary {
             const parentEnvironment = pushOneOfEnvironment(sourceOneOfContext);
             const mappingContext = createOneOfMappingContext();
             let result = Ternary.True;
@@ -21382,12 +21382,12 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 result &= related;
             }
 
-            popOneOfEnvironment(sourceOneOfContext, parentEnvironment, /*capturingRoot*/ source);
+            popOneOfEnvironment(sourceOneOfContext, parentEnvironment, capturingRoot);
 
             return result;
         }
 
-        function typeRelatedToSomeOneOfInstantiation(source: Type, target: Type, reportErrors = false, intersectionState = IntersectionState.None): Ternary {
+        function typeRelatedToSomeOneOfInstantiation(source: Type, target: Type, reportErrors = false, intersectionState = IntersectionState.None, capturingRoot: Type = freeOneOfRootType): Ternary {
             const parentEnvironment = pushOneOfEnvironment(targetOneOfContext);
             const mappingContext = createOneOfMappingContext();
             const saveErrorInfo = captureErrorCalculationState();
@@ -21418,7 +21418,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 nextOneOfMapper(mappingContext);
             }
 
-            popOneOfEnvironment(targetOneOfContext, parentEnvironment, /*capturingRoot*/ target);
+            popOneOfEnvironment(targetOneOfContext, parentEnvironment, capturingRoot);
 
             return result;
         }
@@ -21710,10 +21710,10 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 return result;
             }
             if (source.flags & TypeFlags.AllOf) {
-                return eachOneOfInstantiationRelatedToType((source as AllOfType).origin, target, reportErrors, intersectionState);
+                return eachOneOfInstantiationRelatedToType((source as AllOfType).origin, target, reportErrors, intersectionState, source);
             }
             if (target.flags & TypeFlags.AllOf) {
-                return typeRelatedToSomeOneOfInstantiation(source, (target as AllOfType).origin, reportErrors, intersectionState);
+                return typeRelatedToSomeOneOfInstantiation(source, (target as AllOfType).origin, reportErrors, intersectionState, target);
             }
             if (source.flags & TypeFlags.OneOf) {
                 return isRelatedTo(getOneOfSubstitution(sourceOneOfContext, source as OneOfType), target, RecursionFlags.None, reportErrors, /*headMessage*/ undefined, intersectionState);
