@@ -20435,13 +20435,11 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         let incompatibleStack: DiagnosticAndArguments[] | undefined;
         let sourceOneOfContext: OneOfContext;
         let targetOneOfContext: OneOfContext;
-        let logindent = "";
 
         Debug.assert(relation !== identityRelation || !errorNode, "no error reporting in identity checking");
 
-        console.log("=============== START TOP LEVEL QUERY ===============");
         const result = isRelatedTo(source, target, RecursionFlags.Both, /*reportErrors*/ !!errorNode, headMessage, IntersectionState.None);
-        console.log("=============== END TOP LEVEL QUERY ===============");
+
         if (incompatibleStack) {
             reportIncompatibleStack();
         }
@@ -21220,20 +21218,10 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         }
 
         function getOneOfSubstitution(context: OneOfContext, oneOf: OneOfType) {
-            let mappedType!: Type;
-
-            console.log(logindent, "GETTING SUBST:", oneOf.id);
+            let mappedType: Type;
 
             if (context.mapper && (mappedType = getMappedType(oneOf, context.mapper)) !== oneOf) {
-                console.log(logindent, "MAPPED TYPE FOUND:", oneOf.id, mappedType.id);
                 return mappedType;
-            }
-
-            if (context.mapper) {
-                console.log(logindent, "MAPPED TYPE NOT FOUND:", oneOf.id, mappedType.id);
-            }
-            else {
-                console.log(logindent, "NO MAPPER:", oneOf.id);
             }
 
             discoverOneOf(context, oneOf);
@@ -21249,8 +21237,6 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         }
 
         function pushOneOfEnvironment(context: OneOfContext): OneOfEnvironment {
-            console.log(logindent, "ENTERING ONEOF ENVIRONMENT");
-            logindent += "    ";
             const savedEnvironment = context.environment;
 
             context.environment = createOneOfEnvironment();
@@ -21264,8 +21250,6 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             context.environment = parentEnvironment;
 
             mergeOneOfEnvironment(context, childEnvironment, capturingRoot);
-            logindent = logindent.slice(0, logindent.length - 4);
-            console.log(logindent, `LEAVING ONEOF ENVIRONMENT${capturingRoot ? " (CAPTURED)" : ""}`, [...childEnvironment].map(([o, c]) => [o.id, c?.id]));
         }
 
         function isFreeOneOfRoot(type: Type) {
@@ -21307,8 +21291,6 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 return false;
             }
 
-            console.log(logindent, "NEW FREE ONEOFS:", newFreeOneOfs.map(x => x.id));
-
             const newMappers = generateOneOfTypeMappers(newFreeOneOfs);
 
             for (const oneOf of newFreeOneOfs) {
@@ -21333,10 +21315,6 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         }
 
         function pushOneOfMapper(context: OneOfContext, mapper: TypeMapper | undefined) {
-            console.log(logindent, "ENTERING ONEOF MAPPING SCOPE");
-            console.log(logindent, "SOURCE MAPPER:", mapper && getTypeMapperMappingsForErrorDisplay(mapper));
-            logindent += "    ";
-
             const savedMapper = context.mapper;
 
             context.mapper = mapper ? mergeTypeMappers(savedMapper, mapper) : savedMapper;
@@ -21346,9 +21324,6 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
 
         function popOneOfMapper(context: OneOfContext, parentMapper: TypeMapper | undefined) {
             context.mapper = parentMapper;
-
-            logindent = logindent.slice(0, logindent.length - 4);
-            console.log(logindent, "LEAVING ONEOF MAPPING SCOPE");
         }
 
         function eachOneOfInstantiationRelatedToType(source: Type, target: Type, reportErrors = false, intersectionState = IntersectionState.None, capturingRoot: Type = freeOneOfRootType): Ternary {
@@ -21494,11 +21469,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 targetOneOfContext = createOneOfContext();
             }
             const id = getRelationKey(source, target, intersectionState, relation, /*ignoreConstraints*/ false, sourceOneOfContext, targetOneOfContext);
-            console.log(logindent, "cache id", id, getTypeNameForErrorDisplay(source), getTypeNameForErrorDisplay(target));
             const entry = relation.get(id);
-            if (entry) {
-                console.log(logindent, "cache hit", entry.result, [...entry.sourceOneOfEnvironment].map(([o, c]) => [o.id, c?.id]), [...entry.targetOneOfEnvironment].map(([o, c]) => [o.id, c?.id]));
-            }
             if (entry !== undefined) {
                 if (reportErrors && entry.result & RelationComparisonResult.Failed && !(entry.result & RelationComparisonResult.Reported)) {
                     // We are elaborating errors and the cached result is an unreported failure. The result will be reported
@@ -21623,7 +21594,6 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 });
                 maybeCount = maybeStart;
             }
-            console.log(logindent, 'RESULT:', result);
             popOneOfEnvironment(targetOneOfContext, saveTargetOneOfEnvironment);
             popOneOfEnvironment(sourceOneOfContext, saveSourceOneOfEnvironment);
             return result;
