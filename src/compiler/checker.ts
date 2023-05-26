@@ -6571,6 +6571,10 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 }
             }
             if (type.flags & TypeFlags.OneOf) {
+                if (type.symbol && isValueSymbolAccessible(type.symbol, context.enclosingDeclaration)) {
+                    context.approximateLength += 6;
+                    return symbolToTypeNode(type.symbol, context, type.symbol.flags);
+                }
                 return factory.createTypeOperatorNode(SyntaxKind.OneOfKeyword, typeToTypeNodeHelper((type as OneOfType).origin, context));
             }
             if (type.flags & TypeFlags.AllOf) {
@@ -17008,18 +17012,18 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         return createAllOfType(origin);
     }
 
-    function createOneOfType(origin: UnionType) {
-        const result = createType(TypeFlags.OneOf) as OneOfType;
+    function createOneOfType(origin: UnionType, symbol?: Symbol) {
+        const result = createTypeWithSymbol(TypeFlags.OneOf, symbol!) as OneOfType;
         result.origin = origin;
         return result;
     }
 
-    function getOneOfType(origin: Type) {
+    function getOneOfType(origin: Type, symbol?: Symbol) {
         // Squash nested oneofs. `mapType` will join the unions.
         const mapped = mapType(origin, type => type.flags & TypeFlags.OneOf ? (type as OneOfType).origin : type);
 
         // Don't pack unary types. Their type is definite.
-        return mapped.flags & (TypeFlags.Union | TypeFlags.InstantiableNonPrimitive) ? createOneOfType(mapped as UnionType) : mapped;
+        return mapped.flags & (TypeFlags.Union | TypeFlags.InstantiableNonPrimitive) ? createOneOfType(mapped as UnionType, symbol) : mapped;
     }
 
     function createIndexType(type: InstantiableType | UnionOrIntersectionType, indexFlags: IndexFlags) {
@@ -17195,7 +17199,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                     links.resolvedType = getAllOfType(getTypeFromTypeNode(node.type));
                     break;
                 case SyntaxKind.OneOfKeyword:
-                    links.resolvedType = getOneOfType(getTypeFromTypeNode(node.type));
+                    links.resolvedType = getOneOfType(getTypeFromTypeNode(node.type), getSymbolOfNode(walkUpParenthesizedTypes(node.parent)));
                     break;
                 case SyntaxKind.UniqueKeyword:
                     links.resolvedType = node.type.kind === SyntaxKind.SymbolKeyword
