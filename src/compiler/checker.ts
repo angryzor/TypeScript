@@ -20855,8 +20855,8 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
 
                 traceUnionsOrIntersectionsTooLarge(source, target);
 
-                const skipCaching = source.flags & TypeFlags.Union && (source as UnionType).types.length < 4 && !(target.flags & TypeFlags.Union) ||
-                    target.flags & TypeFlags.Union && (target as UnionType).types.length < 4 && !(source.flags & TypeFlags.StructuredOrInstantiable);
+                const skipCaching = source.flags & TypeFlags.Union && (source as UnionType).types.length < 4 && !(target.flags & TypeFlags.Union) && targetOneOfContext?.inOneOfContext ||
+                    target.flags & TypeFlags.Union && (target as UnionType).types.length < 4 && !(source.flags & TypeFlags.StructuredOrInstantiable) && sourceOneOfContext?.inOneOfContext;
                 const result = skipCaching ?
                     unionOrIntersectionRelatedTo(source, target, reportErrors, intersectionState) :
                     recursiveTypeRelatedTo(source, target, reportErrors, intersectionState, recursionFlags);
