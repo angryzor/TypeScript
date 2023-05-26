@@ -910,7 +910,7 @@ export const enum RelationComparisonResult {
 }
 
 /** @internal */
-export type OneOfEnvironment = Map<OneOfType, Type | undefined>;
+export type OneOfEnvironment = Map<OneOfType, Type>;
 
 /** @internal */
 export interface OneOfContext {

@@ -2015,6 +2015,9 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
     var markerSubTypeForCheck = createTypeParameter();
     markerSubTypeForCheck.constraint = markerSuperTypeForCheck;
 
+    var freeOneOfRootType = createType(TypeFlags.Unknown);
+    var freeWithConflictsOneOfRootType = createType(TypeFlags.Unknown);
+
     var noTypePredicate = createTypePredicate(TypePredicateKind.Identifier, "<<unresolved>>", 0, anyType);
 
     var anySignature = createSignature(/*declaration*/ undefined, /*typeParameters*/ undefined, /*thisParameter*/ undefined, emptyArray, anyType, /*resolvedTypePredicate*/ undefined, 0, SignatureFlags.None);
@@ -21233,7 +21236,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 console.log(logindent, "NO MAPPER:", oneOf.id);
             }
 
-            context.environment.set(oneOf, undefined);
+            discoverOneOf(context, oneOf);
             return oneOf.origin.types[oneOf.origin.types.length - 1];
         }
 
@@ -21242,7 +21245,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         }
 
         function createOneOfEnvironment(): OneOfEnvironment {
-            return new Map<OneOfType, Type | undefined>();
+            return new Map<OneOfType, Type>();
         }
 
         function pushOneOfEnvironment(context: OneOfContext): OneOfEnvironment {
@@ -21265,11 +21268,17 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             console.log(logindent, `LEAVING ONEOF ENVIRONMENT${capturingRoot ? " (CAPTURED)" : ""}`, [...childEnvironment].map(([o, c]) => [o.id, c?.id]));
         }
 
+        function isFreeOneOfRoot(type: Type) {
+            return type === freeOneOfRootType || type === freeWithConflictsOneOfRootType;
+        }
+
+        function discoverOneOf(context: OneOfContext, oneOf: OneOfType, root: Type = freeOneOfRootType) {
+            context.environment.set(oneOf, !context.environment.has(oneOf) || context.environment.get(oneOf) === root ? root : freeWithConflictsOneOfRootType);
+        }
+
         function mergeOneOfEnvironment(context: OneOfContext, source: OneOfEnvironment, capturingRoot?: Type) {
             for (const [oneOf, root] of source) {
-                const newRoot = root || capturingRoot;
-
-                context.environment.set(oneOf, !context.environment.has(oneOf) || context.environment.get(oneOf) === newRoot ? newRoot : undefined);
+                discoverOneOf(context, oneOf, !isFreeOneOfRoot(root) ? root : capturingRoot ? capturingRoot : root);
             }
         }
 
@@ -21284,9 +21293,15 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         }
 
         function mapUnmappedFreeOneOfs(context: OneOfContext, mappingContext: OneOfMappingContext) {
-            const newFreeOneOfs = [...context.environment]
-                .filter(([oneOf, role]) => role === undefined && !mappingContext.mappedOneOfs.has(oneOf))
-                .map(([oneOf]) => oneOf);
+            let conflictsFound = false;
+            const newFreeOneOfs = [];
+
+            for (const [oneOf, root] of context.environment) {
+                if (isFreeOneOfRoot(root) && !mappingContext.mappedOneOfs.has(oneOf)) {
+                    conflictsFound ||= root === freeWithConflictsOneOfRootType;
+                    newFreeOneOfs.push(oneOf);
+                }
+            }
 
             if (newFreeOneOfs.length === 0) {
                 return false;
@@ -21302,7 +21317,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
 
             mappingContext.mappers = mappingContext.mappers.flatMap(mapper1 => newMappers.map(mapper2 => mergeTypeMappers(mapper1, mapper2)));
 
-            return true;
+            return conflictsFound;
         }
 
         function getCurrentOneOfMapper(context: OneOfMappingContext) {
