@@ -6574,9 +6574,9 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 }
             }
             if (type.flags & TypeFlags.OneOf) {
-                if (type.symbol && isValueSymbolAccessible(type.symbol, context.enclosingDeclaration)) {
+                if (type.symbol && type.symbol.flags & SymbolFlags.Value && isValueSymbolAccessible(type.symbol, context.enclosingDeclaration)) {
                     context.approximateLength += 6;
-                    return symbolToTypeNode(type.symbol, context, type.symbol.flags);
+                    return symbolToTypeNode(type.symbol, context, SymbolFlags.Value);
                 }
                 return factory.createTypeOperatorNode(SyntaxKind.OneOfKeyword, typeToTypeNodeHelper((type as OneOfType).origin, context));
             }
@@ -17191,6 +17191,12 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         return indexType.flags & TypeFlags.Never ? stringType : indexType;
     }
 
+    function getOneOfTypeForNode(node: TypeOperatorNode): Type {
+        const symbol = getSymbolOfNode(walkUpParenthesizedTypes(node.parent));
+
+        return getOneOfType(getTypeFromTypeNode(node.type), symbol && symbol.flags & (SymbolFlags.Value | SymbolFlags.TypeAlias) ? symbol : undefined);
+    }
+
     function getTypeFromTypeOperatorNode(node: TypeOperatorNode): Type {
         const links = getNodeLinks(node);
         if (!links.resolvedType) {
@@ -17202,7 +17208,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                     links.resolvedType = getAllOfType(getTypeFromTypeNode(node.type));
                     break;
                 case SyntaxKind.OneOfKeyword:
-                    links.resolvedType = getOneOfType(getTypeFromTypeNode(node.type), getSymbolOfNode(walkUpParenthesizedTypes(node.parent)));
+                    links.resolvedType = getOneOfTypeForNode(node);
                     break;
                 case SyntaxKind.UniqueKeyword:
                     links.resolvedType = node.type.kind === SyntaxKind.SymbolKeyword
