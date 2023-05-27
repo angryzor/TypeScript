@@ -914,9 +914,13 @@ export type OneOfEnvironment = Map<OneOfType, AllOfType>;
 
 /** @internal */
 export interface OneOfContext {
+    scope?: OneOfScope
+}
+
+/** @internal */
+export interface OneOfScope {
     environment: OneOfEnvironment
     mapper: TypeMapper | undefined
-    inOneOfContext: boolean
 }
 
 /** @internal */
@@ -928,8 +932,8 @@ export interface OneOfMappingContext {
 /** @internal */
 export interface RelationEntry {
     result: RelationComparisonResult
-    sourceOneOfEnvironment: OneOfEnvironment
-    targetOneOfEnvironment: OneOfEnvironment
+    sourceOneOfEnvironment?: OneOfEnvironment
+    targetOneOfEnvironment?: OneOfEnvironment
 }
 
 /** @internal */
