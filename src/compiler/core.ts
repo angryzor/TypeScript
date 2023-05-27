@@ -360,6 +360,17 @@ export function *mapIterator<T, U>(iter: Iterable<T>, mapFn: (x: T) => U) {
     }
 }
 
+/** @internal */
+export function mapIterable<T, U>(iter: Iterable<T>, mapFn: (x: T) => U): Iterable<U> {
+    return {
+        *[globalThis.Symbol.iterator]() {
+            for (const x of iter) {
+                yield mapFn(x);
+            }
+        }
+    };
+}
+
 /**
  * Maps from T to T and avoids allocation if all elements map to themselves
  *

@@ -924,7 +924,9 @@ export interface OneOfScope {
 }
 
 /** @internal */
-export interface OneOfMappingContext {
+export interface OneOfMappingContext extends Iterable<TypeMapper | undefined> {
+    context: OneOfContext
+    allOfType: AllOfType
     mappedOneOfs: Set<OneOfType>;
     mappers: (TypeMapper | undefined)[];
 }

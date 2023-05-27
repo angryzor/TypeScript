@@ -809,6 +809,7 @@ import {
     mangleScopedPackageName,
     map,
     mapDefined,
+    mapIterable,
     MappedSymbol,
     MappedType,
     MappedTypeNode,
@@ -20444,8 +20445,16 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         }
     }
 
-    function createOneOfMappingContext(): OneOfMappingContext {
-        return { mappedOneOfs: new Set<OneOfType>(), mappers: [undefined] };
+    function createOneOfMappingContext(context: OneOfContext, allOfType: AllOfType): OneOfMappingContext {
+        return {
+            context,
+            allOfType,
+            mappedOneOfs: new Set<OneOfType>(),
+            mappers: [undefined],
+            [globalThis.Symbol.iterator]() {
+                return mappingContextIterator(this);
+            },
+        };
     }
 
     function generateOneOfTypeMappers(oneOfs: OneOfType[]) {
@@ -20454,11 +20463,13 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         return instantiations.map(instantiation => makeArrayTypeMapper(oneOfs, instantiation));
     }
 
-    function mapUnmappedFreeOneOfs(environment: OneOfEnvironment, mappingContext: OneOfMappingContext) {
+    function mapUnmappedFreeOneOfs(mappingContext: OneOfMappingContext) {
+        Debug.assertIsDefined(mappingContext.context.scope, "using mapping context outside oneof scope");
+
         let conflictsFound = false;
         const newFreeOneOfs = [];
 
-        for (const [oneOf, bindingAllOf] of environment) {
+        for (const [oneOf, bindingAllOf] of mappingContext.context.scope.environment) {
             if (isFreeAllOf(bindingAllOf) && !mappingContext.mappedOneOfs.has(oneOf)) {
                 conflictsFound ||= bindingAllOf === freeWithConflictsAllOfType;
                 newFreeOneOfs.push(oneOf);
@@ -20490,6 +20501,49 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
 
     function nextOneOfMapper(mappingContext: OneOfMappingContext) {
         return mappingContext.mappers.pop();
+    }
+
+    function* mappingContextIterator(mappingContext: OneOfMappingContext) {
+        const parentScope = pushOneOfScope(mappingContext.context);
+
+        Debug.assertIsDefined(mappingContext.context.scope, "pushing oneof scope failed");
+
+        try {
+            while (hasPendingOneOfMappers(mappingContext)) {
+                const mapper = getCurrentOneOfMapper(mappingContext);
+                mappingContext.context.scope.mapper = mapper ? mergeTypeMappers(parentScope?.mapper, mapper) : parentScope?.mapper;
+
+                yield mapper;
+            }
+        }
+        finally {
+            popOneOfScope(mappingContext.context, parentScope, mappingContext.allOfType);
+        }
+    }
+
+    function* mapAndFilterConflictsMappingContextIterator<T>(mappingContext: OneOfMappingContext, f: (mapper: TypeMapper | undefined) => T) {
+        for (const mapper of mappingContext) {
+            const result = f(mapper);
+
+            if (!mapUnmappedFreeOneOfs(mappingContext)) {
+                yield { mapper, result };
+
+                nextOneOfMapper(mappingContext);
+            }
+        }
+    }
+
+    function* iterateAndRollbackConflictsMappingContextIterator(mappingContext: OneOfMappingContext, undo: () => void) {
+        for (const mapper of mappingContext) {
+            yield mapper;
+
+            if (mapUnmappedFreeOneOfs(mappingContext)) {
+                undo();
+            }
+            else {
+                nextOneOfMapper(mappingContext);
+            }
+        }
     }
 
     /*
@@ -20537,32 +20591,12 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         return oneOf.origin.types[oneOf.origin.types.length - 1];
     }
 
-    function* mapOneOfInstantiations<T>(context: OneOfContext, func: () => T, undo?: () => void, allOfType: AllOfType = freeAllOfType) {
-        const parentScope = pushOneOfScope(context);
-        const mappingContext = createOneOfMappingContext();
+    function mapOneOfInstantiationsAndFilterConflicts<T>(context: OneOfContext, allOfType: AllOfType = freeAllOfType, f: (mapper: TypeMapper | undefined) => T) {
+        return { [globalThis.Symbol.iterator]: () => mapAndFilterConflictsMappingContextIterator(createOneOfMappingContext(context, allOfType), f) };
+    }
 
-        Debug.assertIsDefined(context.scope, "pushing oneof scope failed");
-
-        try {
-            while (hasPendingOneOfMappers(mappingContext)) {
-                const mapper = getCurrentOneOfMapper(mappingContext);
-                context.scope.mapper = mapper ? mergeTypeMappers(parentScope?.mapper, mapper) : parentScope?.mapper;
-
-                const result = func();
-
-                if (mapUnmappedFreeOneOfs(context.scope.environment, mappingContext)) {
-                    undo?.();
-                    continue;
-                }
-
-                yield { result, mapper };
-
-                nextOneOfMapper(mappingContext);
-            }
-        }
-        finally {
-            popOneOfScope(context, parentScope, allOfType);
-        }
+    function iterateOneOfInstantiationsAndRollbackConflicts(context: OneOfContext, allOfType: AllOfType = freeAllOfType, undo: () => void) {
+        return { [globalThis.Symbol.iterator]: () => iterateAndRollbackConflictsMappingContextIterator(createOneOfMappingContext(context, allOfType), undo) };
     }
 
     /**
@@ -21386,15 +21420,10 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         function eachOneOfInstantiationRelatedTo(context: OneOfContext, source: Type, target: Type, reportErrors = false, intersectionState = IntersectionState.None, allOfType?: AllOfType) {
             const saveErrorInfo = captureErrorCalculationState();
 
-            return mapOneOfInstantiations(
-                context,
-                () => {
-                    resetErrorInfo(saveErrorInfo);
-                    return isRelatedTo(source, target, RecursionFlags.None, reportErrors, /*headMessage*/ undefined, intersectionState);
-                },
-                /*undo*/ undefined,
-                allOfType
-            );
+            return mapOneOfInstantiationsAndFilterConflicts(context, allOfType, () => {
+                resetErrorInfo(saveErrorInfo);
+                return isRelatedTo(source, target, RecursionFlags.None, reportErrors, /*headMessage*/ undefined, intersectionState);
+            });
         }
 
         function eachOneOfInstantiationRelatedToType(source: Type, target: Type, reportErrors = false, intersectionState = IntersectionState.None, allOfType?: AllOfType): Ternary {
@@ -24826,11 +24855,13 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         let sourceStack: Type[];
         let targetStack: Type[];
         let expandingFlags = ExpandingFlags.None;
+        let didRootTargetAllOf = false;
         const sourceOneOfContext = createOneOfContext();
         const targetOneOfContext = createOneOfContext();
         inferFromTypes(originalSource, originalTarget);
 
         function inferFromTypes(source: Type, target: Type): void {
+            console.log(getTypeNameForErrorDisplay(source), '=>', getTypeNameForErrorDisplay(target));
             if (!couldContainTypeVariables(target)) {
                 return;
             }
@@ -24857,6 +24888,31 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 // And if there weren't any type arguments, there's no reason to run inference as the types must be the same.
                 return;
             }
+            const sourceOneOfScope = getCurrentOneOfScope(sourceOneOfContext);
+            const targetOneOfScope = getCurrentOneOfScope(targetOneOfContext);
+            if (!sourceOneOfScope) {
+                inferFromOneOfInstantiations(source, target);
+                return;
+            }
+            if (!targetOneOfScope) {
+                if (!didRootTargetAllOf) {
+                    didRootTargetAllOf = true;
+                    inferToOneOfInstantiations(source, target, freeAllOfType);
+                    return;
+                }
+            }
+            else if (source.flags & TypeFlags.AllOf && target.flags & TypeFlags.AllOf) {
+                inferFromTypes((source as AllOfType).origin, (target as AllOfType).origin);
+                return;
+            }
+            else if (source.flags & TypeFlags.AllOf) {
+                inferFromOneOfInstantiations((source as AllOfType).origin, target);
+                return;
+            }
+            else if (target.flags & TypeFlags.AllOf) {
+                inferToOneOfInstantiations(source, (target as AllOfType).origin, target as AllOfType);
+                return;
+            }
             if (source === target && source.flags & TypeFlags.UnionOrIntersection) {
                 // When source and target are the same union or intersection type, just relate each constituent
                 // type to itself.
@@ -24864,9 +24920,6 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                     inferFromTypes(t, t);
                 }
                 return;
-            }
-            if (!sourceOneOfContext.inOneOfContext) {
-                const mappingContext = createOneOfMappingContext();
             }
             if (target.flags & TypeFlags.Union) {
                 // First, infer between identically matching source and target constituents and remove the
@@ -25012,21 +25065,13 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             else if (source.flags & TypeFlags.OneOf && target.flags & TypeFlags.OneOf) {
                 inferFromTypes((source as OneOfType).origin, (target as OneOfType).origin);
             }
-            // else if (source.flags & TypeFlags.OneOf) {
-
-            // }
+            else if (source.flags & TypeFlags.OneOf) {
+                inferFromTypes(getOneOfSubstitution(sourceOneOfScope, source as OneOfType), target);
+            }
             else if (target.flags & TypeFlags.OneOf) {
-                inferFromTypes(source, (target as OneOfType).origin);
+                Debug.assertIsDefined(targetOneOfScope, "oneof encountered outside oneof scope during inferencing");
+                inferFromTypes(source, getOneOfSubstitution(targetOneOfScope, target as OneOfType));
             }
-            else if (source.flags & TypeFlags.AllOf && target.flags & TypeFlags.AllOf) {
-                inferFromTypes((source as AllOfType).origin, (target as AllOfType).origin);
-            }
-            // else if (source.flags & TypeFlags.AllOf) {
-
-            // }
-            // else if (target.flags & TypeFlags.AllOf) {
-            //     inferFromTypes(source, (target as AllOfType).origin);
-            // }
             else if (target.flags & TypeFlags.Conditional) {
                 invokeOnce(source, (target as ConditionalType), inferToConditionalType);
             }
@@ -25088,6 +25133,24 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             priority |= newPriority;
             inferToMultipleTypes(source, targets, targetFlags);
             priority = savePriority;
+        }
+
+        function createInferenceOneOfMappingContext(context: OneOfContext, allOfType?: AllOfType) {
+            let savedInferences: InferenceInfo[];
+
+            return mapIterable(iterateOneOfInstantiationsAndRollbackConflicts(context, allOfType, () => inferences = savedInferences), () => {
+                savedInferences = inferences.map(cloneInferenceInfo);
+            });
+        }
+
+        function inferFromOneOfInstantiations(source: Type, target: Type, allOfType?: AllOfType) {
+            for (const _ of createInferenceOneOfMappingContext(sourceOneOfContext, allOfType)) {
+                inferFromTypes(source, target);
+            }
+        }
+
+        function inferToOneOfInstantiations(source: Type, target: Type, allOfType: AllOfType) {
+            inferToMultipleTypes(source, mapIterable(createInferenceOneOfMappingContext(targetOneOfContext, allOfType), () => target), allOfType.flags);
         }
 
         function invokeOnce<Source extends Type, Target extends Type>(source: Source, target: Target, action: (source: Source, target: Target) => void) {
@@ -25176,7 +25239,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             return undefined;
         }
 
-        function getSingleTypeVariableFromIntersectionTypes(types: Type[]) {
+        function getSingleTypeVariableFromIntersectionTypes(types: Iterable<Type>) {
             let typeVariable: Type | undefined;
             for (const type of types) {
                 const t = type.flags & TypeFlags.Intersection && find((type as IntersectionType).types, t => !!getInferenceInfoForType(t));
@@ -25188,9 +25251,9 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             return typeVariable;
         }
 
-        function inferToMultipleTypes(source: Type, targets: Type[], targetFlags: TypeFlags) {
+        function inferToMultipleTypes(source: Type, targets: Iterable<Type>, targetFlags: TypeFlags) {
             let typeVariableCount = 0;
-            if (targetFlags & TypeFlags.Union) {
+            if (targetFlags & (TypeFlags.Union | TypeFlags.AllOf)) {
                 let nakedTypeVariable: Type | undefined;
                 const sources = source.flags & TypeFlags.Union ? (source as UnionType).types : [source];
                 const matched = new Array<boolean>(sources.length);
