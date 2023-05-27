@@ -2015,8 +2015,8 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
     var markerSubTypeForCheck = createTypeParameter();
     markerSubTypeForCheck.constraint = markerSuperTypeForCheck;
 
-    var freeOneOfRootType = createType(TypeFlags.Unknown);
-    var freeWithConflictsOneOfRootType = createType(TypeFlags.Unknown);
+    var freeAllOfType = createAllOfType(neverType);
+    var freeWithConflictsAllOfType = createAllOfType(neverType);
 
     var noTypePredicate = createTypePredicate(TypePredicateKind.Identifier, "<<unresolved>>", 0, anyType);
 
@@ -20405,10 +20405,29 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         return elements !== normalizedElements ? createNormalizedTupleType(type.target, normalizedElements) : type;
     }
 
+    function createOneOfContext(): OneOfContext {
+        return { environment: createOneOfEnvironment(), mapper: undefined, inOneOfContext: false };
+    }
+
+    function getOneOfMapper(context: OneOfContext) {
+        return context.mapper;
+    }
+
+    function pushOneOfMapper(context: OneOfContext, mapper: TypeMapper | undefined) {
+        const savedMapper = context.mapper;
+        context.mapper = mapper ? mergeTypeMappers(savedMapper, mapper) : savedMapper;
+        return savedMapper;
+    }
+
+    function popOneOfMapper(context: OneOfContext, parentMapper: TypeMapper | undefined) {
+        context.mapper = parentMapper;
+    }
+
     function getOneOfSubstitution(context: OneOfContext, oneOf: OneOfType) {
+        const mapper = getOneOfMapper(context);
         let mappedType: Type;
 
-        if (context.mapper && (mappedType = getMappedType(oneOf, context.mapper)) !== oneOf) {
+        if (mapper && (mappedType = getMappedType(oneOf, mapper)) !== oneOf) {
             return mappedType;
         }
 
@@ -20416,41 +20435,33 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         return oneOf.origin.types[oneOf.origin.types.length - 1];
     }
 
-    function createOneOfContext(): OneOfContext {
-        return { environment: createOneOfEnvironment(), mapper: undefined, inOneOfContext: false };
-    }
-
     function createOneOfEnvironment(): OneOfEnvironment {
-        return new Map<OneOfType, Type>();
+        return new Map<OneOfType, AllOfType>();
     }
 
     function pushOneOfEnvironment(context: OneOfContext): OneOfEnvironment {
         const savedEnvironment = context.environment;
-
         context.environment = createOneOfEnvironment();
-
         return savedEnvironment;
     }
 
-    function popOneOfEnvironment(context: OneOfContext, parentEnvironment: OneOfEnvironment, capturingRoot?: Type) {
+    function popOneOfEnvironment(context: OneOfContext, parentEnvironment: OneOfEnvironment, capturingAllOf?: AllOfType) {
         const childEnvironment = context.environment;
-
         context.environment = parentEnvironment;
-
-        mergeOneOfEnvironment(context, childEnvironment, capturingRoot);
+        mergeOneOfEnvironment(context, childEnvironment, capturingAllOf);
     }
 
-    function isFreeOneOfRoot(type: Type) {
-        return type === freeOneOfRootType || type === freeWithConflictsOneOfRootType;
+    function isFreeAllOf(type: AllOfType) {
+        return type === freeAllOfType || type === freeWithConflictsAllOfType;
     }
 
-    function discoverOneOf(context: OneOfContext, oneOf: OneOfType, root: Type = freeOneOfRootType) {
-        context.environment.set(oneOf, !context.environment.has(oneOf) || context.environment.get(oneOf) === root ? root : freeWithConflictsOneOfRootType);
+    function discoverOneOf(context: OneOfContext, oneOf: OneOfType, bindingAllOf: AllOfType = freeAllOfType) {
+        context.environment.set(oneOf, !context.environment.has(oneOf) || context.environment.get(oneOf) === bindingAllOf ? bindingAllOf : freeWithConflictsAllOfType);
     }
 
-    function mergeOneOfEnvironment(context: OneOfContext, source: OneOfEnvironment, capturingRoot?: Type) {
-        for (const [oneOf, root] of source) {
-            discoverOneOf(context, oneOf, !isFreeOneOfRoot(root) ? root : capturingRoot ? capturingRoot : root);
+    function mergeOneOfEnvironment(context: OneOfContext, source: OneOfEnvironment, capturingAllOf?: AllOfType) {
+        for (const [oneOf, bindingAllOf] of source) {
+            discoverOneOf(context, oneOf, !isFreeAllOf(bindingAllOf) ? bindingAllOf : capturingAllOf ? capturingAllOf : bindingAllOf);
         }
     }
 
@@ -20468,9 +20479,9 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         let conflictsFound = false;
         const newFreeOneOfs = [];
 
-        for (const [oneOf, root] of context.environment) {
-            if (isFreeOneOfRoot(root) && !mappingContext.mappedOneOfs.has(oneOf)) {
-                conflictsFound ||= root === freeWithConflictsOneOfRootType;
+        for (const [oneOf, bindingAllOf] of context.environment) {
+            if (isFreeAllOf(bindingAllOf) && !mappingContext.mappedOneOfs.has(oneOf)) {
+                conflictsFound ||= bindingAllOf === freeWithConflictsAllOfType;
                 newFreeOneOfs.push(oneOf);
             }
         }
@@ -20502,16 +20513,30 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         return context.mappers.pop();
     }
 
-    function pushOneOfMapper(context: OneOfContext, mapper: TypeMapper | undefined) {
-        const savedMapper = context.mapper;
+    function* mapEachOneOfInstantiation<T>(context: OneOfContext, func: () => T, undo?: () => void, allOfType: AllOfType = freeAllOfType) {
+        const parentEnvironment = pushOneOfEnvironment(context);
+        const mappingContext = createOneOfMappingContext();
 
-        context.mapper = mapper ? mergeTypeMappers(savedMapper, mapper) : savedMapper;
+        try {
+            while (hasPendingOneOfMappers(mappingContext)) {
+                const mapper = getCurrentOneOfMapper(mappingContext);
+                const parentMapper = pushOneOfMapper(context, mapper);
+                const result = func();
+                popOneOfMapper(context, parentMapper);
 
-        return savedMapper;
-    }
+                if (mapUnmappedFreeOneOfs(context, mappingContext)) {
+                    undo?.();
+                    continue;
+                }
 
-    function popOneOfMapper(context: OneOfContext, parentMapper: TypeMapper | undefined) {
-        context.mapper = parentMapper;
+                yield { result, mapper };
+
+                nextOneOfMapper(mappingContext);
+            }
+        }
+        finally {
+            popOneOfEnvironment(context, parentEnvironment, allOfType);
+        }
     }
 
     /**
@@ -21332,76 +21357,47 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             }
         }
 
-        function eachOneOfInstantiationRelatedToType(source: Type, target: Type, reportErrors = false, intersectionState = IntersectionState.None, capturingRoot: Type = freeOneOfRootType): Ternary {
-            const parentEnvironment = pushOneOfEnvironment(sourceOneOfContext);
-            const mappingContext = createOneOfMappingContext();
-            let result = Ternary.True;
+        function eachOneOfInstantiationRelatedTo(context: OneOfContext, source: Type, target: Type, reportErrors = false, intersectionState = IntersectionState.None, allOfType?: AllOfType) {
+            const saveErrorInfo = captureErrorCalculationState();
 
-            while (hasPendingOneOfMappers(mappingContext)) {
-                const mapper = getCurrentOneOfMapper(mappingContext);
-                const parentMapper = pushOneOfMapper(sourceOneOfContext, mapper);
+            return mapEachOneOfInstantiation(
+                context,
+                () => {
+                    resetErrorInfo(saveErrorInfo);
+                    return isRelatedTo(source, target, RecursionFlags.None, reportErrors, /*headMessage*/ undefined, intersectionState);
+                },
+                /*undo*/ undefined,
+                allOfType
+            );
+        }
 
-                const related = isRelatedTo(source, target, RecursionFlags.None, reportErrors, /*headMessage*/ undefined, intersectionState);
+        function eachOneOfInstantiationRelatedToType(source: Type, target: Type, reportErrors = false, intersectionState = IntersectionState.None, allOfType?: AllOfType): Ternary {
+            let totalResult = Ternary.True;
 
-                popOneOfMapper(sourceOneOfContext, parentMapper);
-
-                if (mapUnmappedFreeOneOfs(sourceOneOfContext, mappingContext)) {
-                    continue;
-                }
-
-                if (!related) {
+            for (const { result, mapper } of eachOneOfInstantiationRelatedTo(sourceOneOfContext, source, target, reportErrors, intersectionState, allOfType)) {
+                if (!result) {
                     if (reportErrors) {
                         reportSubstitutions(mapper, source);
                     }
-
-                    result = Ternary.False;
-                    break;
+                    return Ternary.False;
                 }
-
-                nextOneOfMapper(mappingContext);
-
-                result &= related;
+                totalResult &= result;
             }
 
-            popOneOfEnvironment(sourceOneOfContext, parentEnvironment, capturingRoot);
-
-            return result;
+            return totalResult;
         }
 
-        function typeRelatedToSomeOneOfInstantiation(source: Type, target: Type, reportErrors = false, intersectionState = IntersectionState.None, capturingRoot: Type = freeOneOfRootType): Ternary {
-            const parentEnvironment = pushOneOfEnvironment(targetOneOfContext);
-            const mappingContext = createOneOfMappingContext();
-            const saveErrorInfo = captureErrorCalculationState();
-            let result = Ternary.False;
-
-            while (hasPendingOneOfMappers(mappingContext)) {
-                resetErrorInfo(saveErrorInfo);
-                const mapper = getCurrentOneOfMapper(mappingContext);
-                const parentMapper = pushOneOfMapper(targetOneOfContext, mapper);
-
-                const related = isRelatedTo(source, target, RecursionFlags.None, reportErrors, /*headMessage*/ undefined, intersectionState);
-
-                popOneOfMapper(targetOneOfContext, parentMapper);
-
-                if (mapUnmappedFreeOneOfs(targetOneOfContext, mappingContext)) {
-                    continue;
+        function typeRelatedToSomeOneOfInstantiation(source: Type, target: Type, reportErrors = false, intersectionState = IntersectionState.None, allOfType?: AllOfType): Ternary {
+            for (const { result, mapper } of eachOneOfInstantiationRelatedTo(targetOneOfContext, source, target, reportErrors, intersectionState, allOfType)) {
+                if (result) {
+                    return result;
                 }
-
-                if (related) {
-                    result = related;
-                    break;
-                }
-
                 if (reportErrors) {
                     reportSubstitutions(mapper, target);
                 }
-
-                nextOneOfMapper(mappingContext);
             }
 
-            popOneOfEnvironment(targetOneOfContext, parentEnvironment, capturingRoot);
-
-            return result;
+            return Ternary.False;
         }
 
         function typeArgumentsRelatedTo(sources: readonly Type[] = emptyArray, targets: readonly Type[] = emptyArray, variances: readonly VarianceFlags[] = emptyArray, reportErrors: boolean, intersectionState: IntersectionState): Ternary {
@@ -21686,10 +21682,10 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 return result;
             }
             if (source.flags & TypeFlags.AllOf) {
-                return eachOneOfInstantiationRelatedToType((source as AllOfType).origin, target, reportErrors, intersectionState, source);
+                return eachOneOfInstantiationRelatedToType((source as AllOfType).origin, target, reportErrors, intersectionState, (source as AllOfType));
             }
             if (target.flags & TypeFlags.AllOf) {
-                return typeRelatedToSomeOneOfInstantiation(source, (target as AllOfType).origin, reportErrors, intersectionState, target);
+                return typeRelatedToSomeOneOfInstantiation(source, (target as AllOfType).origin, reportErrors, intersectionState, (target as AllOfType));
             }
             if (source.flags & TypeFlags.OneOf) {
                 return isRelatedTo(getOneOfSubstitution(sourceOneOfContext, source as OneOfType), target, RecursionFlags.None, reportErrors, /*headMessage*/ undefined, intersectionState);
