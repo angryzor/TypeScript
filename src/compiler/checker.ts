@@ -6577,7 +6577,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 }
             }
             if (type.flags & TypeFlags.OneOf) {
-                if (type.symbol && type.symbol.flags & SymbolFlags.Value && isValueSymbolAccessible(type.symbol, context.enclosingDeclaration)) {
+                if (type.symbol && type.symbol.flags & SymbolFlags.Value && context.enclosingDeclaration && isValueSymbolAccessible(type.symbol, context.enclosingDeclaration)) {
                     context.approximateLength += 6;
                     return symbolToTypeNode(type.symbol, context, SymbolFlags.Value);
                 }
