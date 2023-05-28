@@ -6506,7 +6506,7 @@ export interface IntersectionType extends UnionOrIntersectionType {
 }
 
 export interface OneOfType extends Type {
-    origin: UnionType;
+    origin: UnionType | InstantiableType;
     objectFlags: ObjectFlags;
     // resolvedProperties: Symbol[];
 }

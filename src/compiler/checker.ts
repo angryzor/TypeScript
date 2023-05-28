@@ -13095,15 +13095,17 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
     }
 
     function resolveOneOfTypeMembers(type: OneOfType) {
-        const union = type.origin;
-        const resolvedUnion = resolveStructuredTypeMembers(union);
-        const callSignatures = resolvedUnion.callSignatures;
-        const constructSignatures = resolvedUnion.constructSignatures;
-        const indexInfos = resolvedUnion.indexInfos;
-        // const callSignatures = instantiateSignatures(getSignaturesOfType(type.target, SignatureKind.Call), type.mapper!);
-        // const constructSignatures = instantiateSignatures(getSignaturesOfType(type.target, SignatureKind.Construct), type.mapper!);
-        // const indexInfos = instantiateIndexInfos(getIndexInfosOfType(type.target), type.mapper!);
-        setStructuredTypeMembers(type, emptySymbols, callSignatures, constructSignatures, indexInfos);
+        const child = getReducedApparentType(type.origin);
+        if (child.flags & TypeFlags.StructuredType) {
+            const resolvedUnion = resolveStructuredTypeMembers(child as StructuredType);
+            const callSignatures = resolvedUnion.callSignatures;
+            const constructSignatures = resolvedUnion.constructSignatures;
+            const indexInfos = resolvedUnion.indexInfos;
+            // const callSignatures = instantiateSignatures(getSignaturesOfType(type.target, SignatureKind.Call), type.mapper!);
+            // const constructSignatures = instantiateSignatures(getSignaturesOfType(type.target, SignatureKind.Construct), type.mapper!);
+            // const indexInfos = instantiateIndexInfos(getIndexInfosOfType(type.target), type.mapper!);
+            setStructuredTypeMembers(type, emptySymbols, callSignatures, constructSignatures, indexInfos);
+        }
     }
 
     function resolveAllOfTypeMembers(type: AllOfType) {
@@ -13588,7 +13590,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         //     type.resolvedProperties = unionProps.map(prop => createSymbolWithType(prop, getDeferredPropAccess(type, prop)));
         // }
         // return type.resolvedProperties;
-        return getPropertiesOfUnionOrIntersectionType(type.origin);
+        return getPropertiesOfType(type.origin);
     }
 
     function getPropertiesOfType(type: Type): Symbol[] {
@@ -14251,7 +14253,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         // }
 
         // return property;
-        return getPropertyOfUnionOrIntersectionType(type.origin, name, skipObjectFunctionPropertyAugment);
+        return getPropertyOfType(type.origin, name, skipObjectFunctionPropertyAugment);
     }
 
     /**
@@ -17017,7 +17019,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         return createAllOfType(origin);
     }
 
-    function createOneOfType(origin: UnionType, symbol?: Symbol) {
+    function createOneOfType(origin: UnionType | InstantiableType, symbol?: Symbol) {
         const result = createTypeWithSymbol(TypeFlags.OneOf, symbol!) as OneOfType;
         result.origin = origin;
         return result;
@@ -17028,7 +17030,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         const mapped = mapType(origin, type => type.flags & TypeFlags.OneOf ? (type as OneOfType).origin : type);
 
         // Don't pack unary types. Their type is definite.
-        return mapped.flags & (TypeFlags.Union | TypeFlags.InstantiableNonPrimitive) ? createOneOfType(mapped as UnionType, symbol) : mapped;
+        return mapped.flags & (TypeFlags.Union | TypeFlags.InstantiableNonPrimitive) ? createOneOfType(mapped as UnionType | InstantiableType, symbol) : mapped;
     }
 
     function createIndexType(type: InstantiableType | UnionOrIntersectionType, indexFlags: IndexFlags) {
@@ -20458,7 +20460,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
     }
 
     function generateOneOfTypeMappers(oneOfs: OneOfType[]) {
-        const instantiations = cartesianProduct(oneOfs.map(oneOf => oneOf.origin.types));
+        const instantiations = cartesianProduct(oneOfs.map(oneOf => oneOf.flags & TypeFlags.Union ? (oneOf.origin as UnionType).types : [oneOf.origin]));
 
         return instantiations.map(instantiation => makeArrayTypeMapper(oneOfs, instantiation));
     }
@@ -20588,7 +20590,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         }
 
         discoverOneOf(scope.environment, oneOf);
-        return oneOf.origin.types[oneOf.origin.types.length - 1];
+        return oneOf.origin.flags & TypeFlags.Union ? (oneOf.origin as UnionType).types[(oneOf.origin as UnionType).types.length - 1] : oneOf.origin;
     }
 
     function mapOneOfInstantiationsAndFilterConflicts<T>(context: OneOfContext, allOfType: AllOfType = freeAllOfType, f: (mapper: TypeMapper | undefined) => T) {
@@ -24861,7 +24863,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         inferFromTypes(originalSource, originalTarget);
 
         function inferFromTypes(source: Type, target: Type): void {
-            console.log(getTypeNameForErrorDisplay(source), '=>', getTypeNameForErrorDisplay(target));
+            console.log(getTypeNameForErrorDisplay(source), "=>", getTypeNameForErrorDisplay(target));
             if (!couldContainTypeVariables(target)) {
                 return;
             }
@@ -24890,10 +24892,6 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             }
             const sourceOneOfScope = getCurrentOneOfScope(sourceOneOfContext);
             const targetOneOfScope = getCurrentOneOfScope(targetOneOfContext);
-            if (!sourceOneOfScope) {
-                inferFromOneOfInstantiations(source, target);
-                return;
-            }
             if (!targetOneOfScope) {
                 if (!didRootTargetAllOf) {
                     didRootTargetAllOf = true;
@@ -24901,16 +24899,20 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                     return;
                 }
             }
+            if (!sourceOneOfScope) {
+                inferFromOneOfInstantiations(source, target);
+                return;
+            }
             else if (source.flags & TypeFlags.AllOf && target.flags & TypeFlags.AllOf) {
                 inferFromTypes((source as AllOfType).origin, (target as AllOfType).origin);
                 return;
             }
-            else if (source.flags & TypeFlags.AllOf) {
-                inferFromOneOfInstantiations((source as AllOfType).origin, target);
-                return;
-            }
             else if (target.flags & TypeFlags.AllOf) {
                 inferToOneOfInstantiations(source, (target as AllOfType).origin, target as AllOfType);
+                return;
+            }
+            else if (source.flags & TypeFlags.AllOf) {
+                inferFromOneOfInstantiations((source as AllOfType).origin, target);
                 return;
             }
             if (source === target && source.flags & TypeFlags.UnionOrIntersection) {
