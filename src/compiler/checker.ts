@@ -17196,9 +17196,15 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         return indexType.flags & TypeFlags.Never ? stringType : indexType;
     }
 
+    function getAllOfTypeForNode(node: TypeOperatorNode): Type {
+        const type = getAllOfType(getTypeFromTypeNode(node.type));
+        type.aliasSymbol = getAliasSymbolForTypeNode(node);
+        return type;
+    }
+
     function getOneOfTypeForNode(node: TypeOperatorNode): Type {
         const symbol = getSymbolOfNode(walkUpParenthesizedTypes(node.parent));
-        const type = getOneOfType(getTypeFromTypeNode(node.type), symbol && symbol.flags & (SymbolFlags.Value | SymbolFlags.TypeAlias) ? symbol : undefined);
+        const type = getOneOfType(getTypeFromTypeNode(node.type), symbol && symbol.flags & SymbolFlags.Value ? symbol : undefined);
         type.aliasSymbol = getAliasSymbolForTypeNode(node);
         return type;
     }
@@ -17211,7 +17217,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                     links.resolvedType = getIndexType(getTypeFromTypeNode(node.type));
                     break;
                 case SyntaxKind.AllOfKeyword:
-                    links.resolvedType = getAllOfType(getTypeFromTypeNode(node.type));
+                    links.resolvedType = getAllOfTypeForNode(node);
                     break;
                 case SyntaxKind.OneOfKeyword:
                     links.resolvedType = getOneOfTypeForNode(node);
