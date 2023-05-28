@@ -914,22 +914,26 @@ export type OneOfEnvironment = Map<OneOfType, AllOfType>;
 
 /** @internal */
 export interface OneOfContext {
-    scope?: OneOfScope
+    scope?: OneOfScope;
 }
 
 /** @internal */
 export interface OneOfScope {
-    environment: OneOfEnvironment
-    mapper: TypeMapper | undefined
+    environment: OneOfEnvironment;
+    mapper: OneOfInstantiationMap;
+    allOfType: AllOfType;
 }
 
 /** @internal */
-export interface OneOfMappingContext extends Iterable<TypeMapper | undefined> {
-    context: OneOfContext
-    allOfType: AllOfType
+export interface OneOfIterationContext {
+    context: OneOfContext;
+    allOfType: AllOfType;
     mappedOneOfs: Set<OneOfType>;
-    mappers: (TypeMapper | undefined)[];
+    mappers: OneOfInstantiationMap[];
 }
+
+/** @internal */
+export type OneOfInstantiationMap = TypeMapper | undefined;
 
 /** @internal */
 export interface RelationEntry {
