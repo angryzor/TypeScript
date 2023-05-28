@@ -20460,7 +20460,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
     }
 
     function generateOneOfTypeMappers(oneOfs: OneOfType[]) {
-        const instantiations = cartesianProduct(oneOfs.map(oneOf => oneOf.flags & TypeFlags.Union ? (oneOf.origin as UnionType).types : [oneOf.origin]));
+        const instantiations = cartesianProduct(oneOfs.map(oneOf => oneOf.origin.flags & TypeFlags.Union ? (oneOf.origin as UnionType).types : [oneOf.origin]));
 
         return instantiations.map(instantiation => makeArrayTypeMapper(oneOfs, instantiation));
     }
