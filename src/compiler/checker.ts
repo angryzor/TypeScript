@@ -17198,8 +17198,9 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
 
     function getOneOfTypeForNode(node: TypeOperatorNode): Type {
         const symbol = getSymbolOfNode(walkUpParenthesizedTypes(node.parent));
-
-        return getOneOfType(getTypeFromTypeNode(node.type), symbol && symbol.flags & (SymbolFlags.Value | SymbolFlags.TypeAlias) ? symbol : undefined);
+        const type = getOneOfType(getTypeFromTypeNode(node.type), symbol && symbol.flags & (SymbolFlags.Value | SymbolFlags.TypeAlias) ? symbol : undefined);
+        type.aliasSymbol = getAliasSymbolForTypeNode(node);
+        return type;
     }
 
     function getTypeFromTypeOperatorNode(node: TypeOperatorNode): Type {
