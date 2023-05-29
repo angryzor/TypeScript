@@ -24910,7 +24910,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             if (!targetOneOfScope) {
                 if (!didRootTargetAllOf) {
                     didRootTargetAllOf = true;
-                    inferToOneOfInstantiations(source, target, freeAllOfType);
+                    inferToMultipleTypes(source, [target], freeAllOfType);
                     return;
                 }
             }
@@ -24923,7 +24923,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 return;
             }
             else if (target.flags & TypeFlags.AllOf) {
-                inferToOneOfInstantiations(source, (target as AllOfType).origin, target as AllOfType);
+                inferToMultipleTypes(source, [(target as AllOfType).origin], target as AllOfType);
                 return;
             }
             else if (source.flags & TypeFlags.AllOf) {
@@ -25093,7 +25093,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 invokeOnce(source, (target as ConditionalType), inferToConditionalType);
             }
             else if (target.flags & TypeFlags.UnionOrIntersection) {
-                inferToMultipleTypes(source, (target as UnionOrIntersectionType).types, target.flags);
+                inferToMultipleTypes(source, (target as UnionOrIntersectionType).types, target);
             }
             else if (source.flags & TypeFlags.Union) {
                 // Source is a union or intersection type, infer from each constituent type
@@ -25145,17 +25145,20 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             priority = savePriority;
         }
 
-        function inferToMultipleTypesWithPriority(source: Type, targets: Type[], targetFlags: TypeFlags, newPriority: InferencePriority) {
+        function inferToMultipleTypesWithPriority(source: Type, targets: Type[], parentTarget: Type, newPriority: InferencePriority) {
             const savePriority = priority;
             priority |= newPriority;
-            inferToMultipleTypes(source, targets, targetFlags);
+            inferToMultipleTypes(source, targets, parentTarget);
             priority = savePriority;
         }
 
-        function createInferenceOneOfIterationContext(context: OneOfContext, allOfType?: AllOfType) {
+        function createInferenceOneOfIterationContext(context: OneOfContext, allOfType?: AllOfType, undo?: () => void) {
             let savedInferences: InferenceInfo[];
 
-            return mapIterable(iterateOneOfInstantiations(context, allOfType, () => inferences = savedInferences), () => {
+            return mapIterable(iterateOneOfInstantiations(context, allOfType, () => {
+                inferences = savedInferences;
+                undo?.();
+            }), () => {
                 savedInferences = inferences.map(cloneInferenceInfo);
             });
         }
@@ -25164,10 +25167,6 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             for (const _ of createInferenceOneOfIterationContext(sourceOneOfContext, allOfType)) {
                 inferFromTypes(source, target);
             }
-        }
-
-        function inferToOneOfInstantiations(source: Type, target: Type, allOfType: AllOfType) {
-            inferToMultipleTypes(source, mapIterable(createInferenceOneOfIterationContext(targetOneOfContext, allOfType), () => target), allOfType.flags);
         }
 
         function invokeOnce<Source extends Type, Target extends Type>(source: Source, target: Target, action: (source: Source, target: Target) => void) {
@@ -25268,13 +25267,32 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             return typeVariable;
         }
 
-        function inferToMultipleTypes(source: Type, targets: Iterable<Type>, targetFlags: TypeFlags) {
+        function inferToMultipleTypes(source: Type, inputTargets: Type[], parentTarget: Type) {
+            let targets: Iterable<Type> = inputTargets;
             let typeVariableCount = 0;
-            if (targetFlags & (TypeFlags.Union | TypeFlags.AllOf)) {
+            if (parentTarget.flags & (TypeFlags.Union | TypeFlags.AllOf)) {
                 let nakedTypeVariable: Type | undefined;
                 const sources = source.flags & TypeFlags.Union ? (source as UnionType).types : [source];
-                const matched = new Array<boolean>(sources.length);
+                let matched = new Array<boolean>(sources.length);
                 let inferenceCircularity = false;
+
+                if (parentTarget.flags & TypeFlags.AllOf) {
+                    let savedNakedTypeVariable: Type | undefined;
+                    let savedMatched: boolean[];
+                    let savedInferenceCircularity: boolean;
+
+                    targets = mapIterable(createInferenceOneOfIterationContext(targetOneOfContext, parentTarget as AllOfType, () => {
+                        nakedTypeVariable = savedNakedTypeVariable;
+                        matched = savedMatched;
+                        inferenceCircularity = savedInferenceCircularity;
+                    }), () => {
+                        savedNakedTypeVariable = nakedTypeVariable;
+                        savedMatched = matched.slice();
+                        savedInferenceCircularity = inferenceCircularity;
+                        return inputTargets[0];
+                    });
+                }
+
                 // First infer to types that are not naked type variables. For each source type we
                 // track whether inferences were made from that particular type to some target with
                 // equal priority (i.e. of equal quality) to what we would infer for a naked type
@@ -25334,7 +25352,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             // less specific. For example, when inferring from Promise<string> to T | Promise<T>,
             // we want to infer string for T, not Promise<string> | string. For intersection types
             // we only infer to single naked type variables.
-            if (targetFlags & TypeFlags.Intersection ? typeVariableCount === 1 : typeVariableCount > 0) {
+            if (parentTarget.flags & TypeFlags.Intersection ? typeVariableCount === 1 : typeVariableCount > 0) {
                 for (const t of targets) {
                     if (getInferenceInfoForType(t)) {
                         inferWithPriority(source, t, InferencePriority.NakedTypeVariable);
@@ -25402,7 +25420,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             }
             else {
                 const targetTypes = [getTrueTypeFromConditionalType(target), getFalseTypeFromConditionalType(target)];
-                inferToMultipleTypesWithPriority(source, targetTypes, target.flags, contravariant ? InferencePriority.ContravariantConditional : 0);
+                inferToMultipleTypesWithPriority(source, targetTypes, target, contravariant ? InferencePriority.ContravariantConditional : 0);
             }
         }
 
