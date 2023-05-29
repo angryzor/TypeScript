@@ -50,6 +50,7 @@ import {
     EnumMember,
     EqualsGreaterThanToken,
     ExclamationToken,
+    ExistentialTypeNode,
     ExportAssignment,
     ExportDeclaration,
     ExportKeyword,
@@ -501,6 +502,10 @@ export function isOptionalTypeNode(node: Node): node is OptionalTypeNode {
 
 export function isRestTypeNode(node: Node): node is RestTypeNode {
     return node.kind === SyntaxKind.RestType;
+}
+
+export function isExistentialTypeNode(node: Node): node is ExistentialTypeNode {
+    return node.kind === SyntaxKind.ExistentialType;
 }
 
 export function isUnionTypeNode(node: Node): node is UnionTypeNode {

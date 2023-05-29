@@ -257,6 +257,7 @@ export const enum SyntaxKind {
     TupleType,
     OptionalType,
     RestType,
+    ExistentialType,
     UnionType,
     IntersectionType,
     ConditionalType,
@@ -720,6 +721,7 @@ export type TypeNodeSyntaxKind =
     | SyntaxKind.NamedTupleMember
     | SyntaxKind.OptionalType
     | SyntaxKind.RestType
+    | SyntaxKind.ExistentialType
     | SyntaxKind.UnionType
     | SyntaxKind.IntersectionType
     | SyntaxKind.ConditionalType
@@ -1087,6 +1089,7 @@ export type HasChildren =
     | TupleTypeNode
     | OptionalTypeNode
     | RestTypeNode
+    | ExistentialTypeNode
     | UnionTypeNode
     | IntersectionTypeNode
     | ConditionalTypeNode
@@ -2298,7 +2301,12 @@ export interface RestTypeNode extends TypeNode {
     readonly type: TypeNode;
 }
 
-export type UnionOrIntersectionTypeNode = UnionTypeNode | IntersectionTypeNode;
+export type UnionOrIntersectionTypeNode = ExistentialTypeNode | UnionTypeNode | IntersectionTypeNode;
+
+export interface ExistentialTypeNode extends TypeNode {
+    readonly kind: SyntaxKind.ExistentialType;
+    readonly types: NodeArray<TypeNode>;
+}
 
 export interface UnionTypeNode extends TypeNode {
     readonly kind: SyntaxKind.UnionType;
@@ -5383,7 +5391,7 @@ export const enum NodeBuilderFlags {
     AllowThisInObjectLiteral                = 1 << 15,
     AllowQualifiedNameInPlaceOfIdentifier   = 1 << 16,
     AllowAnonymousIdentifier                = 1 << 17,
-    AllowEmptyUnionOrIntersection           = 1 << 18,
+    AllowEmptyUnionOrIntersection                  = 1 << 18,
     AllowEmptyTuple                         = 1 << 19,
     AllowUniqueESSymbolType                 = 1 << 20,
     AllowEmptyIndexInfoType                 = 1 << 21,
@@ -5878,7 +5886,7 @@ export interface SymbolLinks {
     mapper?: TypeMapper;                        // Type mapper for instantiation alias
     referenced?: boolean;                       // True if alias symbol has been referenced as a value that can be emitted
     constEnumReferenced?: boolean;              // True if alias symbol resolves to a const enum and is referenced as a value ('referenced' will be false)
-    containingType?: UnionOrIntersectionType;   // Containing union or intersection type for synthetic property
+    containingType?: UnionOrIntersectionType;          // Containing union or intersection type for synthetic property
     leftSpread?: Symbol;                        // Left source for synthetic spread property
     rightSpread?: Symbol;                       // Right source for synthetic spread property
     syntheticOrigin?: Symbol;                   // For a property on a mapped or spread type, points back to the original property
@@ -6120,16 +6128,17 @@ export const enum TypeFlags {
     TypeParameter   = 1 << 18,  // Type parameter
     Object          = 1 << 19,  // Object type
     Union           = 1 << 20,  // Union (T | U)
-    Intersection    = 1 << 21,  // Intersection (T & U)
-    Index           = 1 << 22,  // keyof T
-    IndexedAccess   = 1 << 23,  // T[K]
-    Conditional     = 1 << 24,  // T extends U ? X : Y
-    Substitution    = 1 << 25,  // Type parameter substitution
-    NonPrimitive    = 1 << 26,  // intrinsic object type
-    TemplateLiteral = 1 << 27,  // Template literal type
-    StringMapping   = 1 << 28,  // Uppercase/Lowercase type
-    OneOf           = 1 << 29,  // oneof T
-    AllOf           = 1 << 30,  // allof T
+    Existential     = 1 << 21,  // Existential (T ^ U)
+    Intersection    = 1 << 22,  // Intersection (T & U)
+    Index           = 1 << 23,  // keyof T
+    IndexedAccess   = 1 << 24,  // T[K]
+    Conditional     = 1 << 25,  // T extends U ? X : Y
+    Substitution    = 1 << 26,  // Type parameter substitution
+    NonPrimitive    = 1 << 27,  // intrinsic object type
+    TemplateLiteral = 1 << 28,  // Template literal type
+    StringMapping   = 1 << 29,  // Uppercase/Lowercase type
+    OneOf           = 1 << 30,  // oneof T
+    AllOf           = 1 << 31,  // allof T
 
     /** @internal */
     AnyOrUnknown = Any | Unknown,
@@ -6159,8 +6168,10 @@ export const enum TypeFlags {
     DefinitelyNonNullable = StringLike | NumberLike | BigIntLike | BooleanLike | EnumLike | ESSymbolLike | Object | NonPrimitive,
     /** @internal */
     DisjointDomains = NonPrimitive | StringLike | NumberLike | BigIntLike | BooleanLike | ESSymbolLike | VoidLike | Null,
+    Union = Existential | Union,
     UnionOrIntersection = Union | Intersection,
-    StructuredType = Object | Union | Intersection | OneOf | AllOf,
+    UnionOperator = OneOf | AllOf,
+    StructuredType = Object | UnionOrIntersection | UnionOperator,
     TypeVariable = TypeParameter | IndexedAccess,
     InstantiableNonPrimitive = TypeVariable | Conditional | Substitution,
     InstantiablePrimitive = Index | TemplateLiteral | StringMapping,
@@ -6504,18 +6515,25 @@ export interface IntersectionType extends UnionOrIntersectionType {
     uniqueLiteralFilledInstantiation?: Type;  // Instantiation with type parameters mapped to never type
 }
 
-export interface OneOfType extends Type {
-    origin: UnionType | InstantiableType;
-    objectFlags: ObjectFlags;
-    // resolvedProperties: Symbol[];
+export interface UnionType extends UnionType {
 }
 
-export interface AllOfType extends Type {
-    origin: Type;
+export interface ExistentialType extends UnionType {
+}
+
+/** @internal */
+export interface UnionOperatorType extends Type {
+    type: Type;
     objectFlags: ObjectFlags;
 }
 
-export type StructuredType = ObjectType | UnionType | IntersectionType | OneOfType | AllOfType;
+export interface OneOfType extends UnionOperatorType {
+}
+
+export interface AllOfType extends UnionOperatorType {
+}
+
+export type StructuredType = ObjectType | ExistentialType | UnionType | IntersectionType | OneOfType | AllOfType;
 
 /** @internal */
 // An instantiated anonymous type has a target and a mapper
@@ -6861,8 +6879,8 @@ export const enum InferencePriority {
 /** @internal */
 export interface InferenceInfo {
     typeParameter: TypeParameter;            // Type parameter for which inferences are being made
-    candidates: Map<string, Type[]>;          // Candidates in covariant positions (or undefined)
-    contraCandidates: Map<string, Type[]>;    // Candidates in contravariant positions (or undefined)
+    candidates: Map<string, Type[]>;         // Candidates in covariant positions (or undefined)
+    contraCandidates: Map<string, Type[]>;   // Candidates in contravariant positions (or undefined)
     inferredType?: Type;                     // Cache for resolved inferred type
     priority?: InferencePriority;            // Priority of current inference set
     topLevel: boolean;                       // True if all inferences are to top level occurrences
@@ -8254,6 +8272,8 @@ export interface ParenthesizerRules {
     parenthesizeTypeOfOptionalType(type: TypeNode): TypeNode;
     parenthesizeConstituentTypeOfUnionType(type: TypeNode): TypeNode;
     parenthesizeConstituentTypesOfUnionType(constituents: readonly TypeNode[]): NodeArray<TypeNode>;
+    parenthesizeConstituentTypeOfExistentialType(type: TypeNode): TypeNode;
+    parenthesizeConstituentTypesOfExistentialType(constituents: readonly TypeNode[]): NodeArray<TypeNode>;
     parenthesizeConstituentTypeOfIntersectionType(type: TypeNode): TypeNode;
     parenthesizeConstituentTypesOfIntersectionType(constituents: readonly TypeNode[]): NodeArray<TypeNode>;
     parenthesizeLeadingTypeArgument(typeNode: TypeNode): TypeNode;
@@ -8453,6 +8473,8 @@ export interface NodeFactory {
     updateRestTypeNode(node: RestTypeNode, type: TypeNode): RestTypeNode;
     createUnionTypeNode(types: readonly TypeNode[]): UnionTypeNode;
     updateUnionTypeNode(node: UnionTypeNode, types: NodeArray<TypeNode>): UnionTypeNode;
+    createExistentialTypeNode(types: readonly TypeNode[]): ExistentialTypeNode;
+    updateExistentialTypeNode(node: ExistentialTypeNode, types: NodeArray<TypeNode>): ExistentialTypeNode;
     createIntersectionTypeNode(types: readonly TypeNode[]): IntersectionTypeNode;
     updateIntersectionTypeNode(node: IntersectionTypeNode, types: NodeArray<TypeNode>): IntersectionTypeNode;
     createConditionalTypeNode(checkType: TypeNode, extendsType: TypeNode, trueType: TypeNode, falseType: TypeNode): ConditionalTypeNode;
@@ -9743,37 +9765,38 @@ export const enum ListFormat {
 
     // Delimiters
     NotDelimited = 0,               // There is no delimiter between list items (default).
-    BarDelimited = 1 << 2,          // Each list item is space-and-bar (" |") delimited.
-    AmpersandDelimited = 1 << 3,    // Each list item is space-and-ampersand (" &") delimited.
-    CommaDelimited = 1 << 4,        // Each list item is comma (",") delimited.
-    AsteriskDelimited = 1 << 5,     // Each list item is asterisk ("\n *") delimited, used with JSDoc.
-    DelimitersMask = BarDelimited | AmpersandDelimited | CommaDelimited | AsteriskDelimited,
+    CaretDelimited = 1 << 2,        // Each list item is caret (" ^") delimited.
+    BarDelimited = 1 << 3,          // Each list item is space-and-bar (" |") delimited.
+    AmpersandDelimited = 1 << 4,    // Each list item is space-and-ampersand (" &") delimited.
+    CommaDelimited = 1 << 5,        // Each list item is comma (",") delimited.
+    AsteriskDelimited = 1 << 6,     // Each list item is asterisk ("\n *") delimited, used with JSDoc.
+    DelimitersMask = CaretDelimited | BarDelimited | AmpersandDelimited | CommaDelimited | AsteriskDelimited,
 
-    AllowTrailingComma = 1 << 6,    // Write a trailing comma (",") if present.
+    AllowTrailingComma = 1 << 7,    // Write a trailing comma (",") if present.
 
     // Whitespace
-    Indented = 1 << 7,              // The list should be indented.
-    SpaceBetweenBraces = 1 << 8,    // Inserts a space after the opening brace and before the closing brace.
-    SpaceBetweenSiblings = 1 << 9,  // Inserts a space between each sibling node.
+    Indented = 1 << 8,              // The list should be indented.
+    SpaceBetweenBraces = 1 << 9,    // Inserts a space after the opening brace and before the closing brace.
+    SpaceBetweenSiblings = 1 << 10,  // Inserts a space between each sibling node.
 
     // Brackets/Braces
-    Braces = 1 << 10,                // The list is surrounded by "{" and "}".
-    Parenthesis = 1 << 11,          // The list is surrounded by "(" and ")".
-    AngleBrackets = 1 << 12,        // The list is surrounded by "<" and ">".
-    SquareBrackets = 1 << 13,       // The list is surrounded by "[" and "]".
+    Braces = 1 << 11,                // The list is surrounded by "{" and "}".
+    Parenthesis = 1 << 12,          // The list is surrounded by "(" and ")".
+    AngleBrackets = 1 << 13,        // The list is surrounded by "<" and ">".
+    SquareBrackets = 1 << 14,       // The list is surrounded by "[" and "]".
     BracketsMask = Braces | Parenthesis | AngleBrackets | SquareBrackets,
 
-    OptionalIfUndefined = 1 << 14,  // Do not emit brackets if the list is undefined.
-    OptionalIfEmpty = 1 << 15,      // Do not emit brackets if the list is empty.
+    OptionalIfUndefined = 1 << 15,  // Do not emit brackets if the list is undefined.
+    OptionalIfEmpty = 1 << 16,      // Do not emit brackets if the list is empty.
     Optional = OptionalIfUndefined | OptionalIfEmpty,
 
     // Other
-    PreferNewLine = 1 << 16,        // Prefer adding a LineTerminator between synthesized nodes.
-    NoTrailingNewLine = 1 << 17,    // Do not emit a trailing NewLine for a MultiLine list.
-    NoInterveningComments = 1 << 18, // Do not emit comments between each node
-    NoSpaceIfEmpty = 1 << 19,       // If the literal is empty, do not add spaces between braces.
-    SingleElement = 1 << 20,
-    SpaceAfterList = 1 << 21,       // Add space after list
+    PreferNewLine = 1 << 17,        // Prefer adding a LineTerminator between synthesized nodes.
+    NoTrailingNewLine = 1 << 18,    // Do not emit a trailing NewLine for a MultiLine list.
+    NoInterveningComments = 1 << 19, // Do not emit comments between each node
+    NoSpaceIfEmpty = 1 << 20,       // If the literal is empty, do not add spaces between braces.
+    SingleElement = 1 << 21,
+    SpaceAfterList = 1 << 22,       // Add space after list
 
     // Precomputed Formats
     Modifiers = SingleLine | SpaceBetweenSiblings | NoInterveningComments | SpaceAfterList,
@@ -9783,6 +9806,7 @@ export const enum ListFormat {
 
     SingleLineTupleTypeElements = CommaDelimited | SpaceBetweenSiblings | SingleLine,
     MultiLineTupleTypeElements = CommaDelimited | Indented | SpaceBetweenSiblings | MultiLine,
+    ExistentialTypeConstituents = CaretDelimited | SpaceBetweenSiblings | SingleLine,
     UnionTypeConstituents = BarDelimited | SpaceBetweenSiblings | SingleLine,
     IntersectionTypeConstituents = AmpersandDelimited | SpaceBetweenSiblings | SingleLine,
     ObjectBindingPatternElements = SingleLine | AllowTrailingComma | SpaceBetweenBraces | CommaDelimited | SpaceBetweenSiblings | NoSpaceIfEmpty,

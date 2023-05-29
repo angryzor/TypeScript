@@ -78,6 +78,7 @@ import {
     EnumDeclaration,
     EnumMember,
     ExclamationToken,
+    ExistentialTypeNode,
     ExportAssignment,
     ExportDeclaration,
     ExportSpecifier,
@@ -324,6 +325,7 @@ import {
     ScriptKind,
     ScriptTarget,
     SetAccessorDeclaration,
+    UnionOrIntersectionTypeNode,
     setParent,
     setParentRecursive,
     setTextRange,
@@ -386,7 +388,6 @@ import {
     TypeReferenceNode,
     UnaryExpression,
     unescapeLeadingUnderscores,
-    UnionOrIntersectionTypeNode,
     UnionTypeNode,
     UpdateExpression,
     VariableDeclaration,
@@ -678,6 +679,7 @@ const forEachChildTable: ForEachChildTable = {
     [SyntaxKind.TupleType]: function forEachChildInTupleType<T>(node: TupleTypeNode, cbNode: (node: Node) => T | undefined, cbNodes?: (nodes: NodeArray<Node>) => T | undefined): T | undefined {
         return visitNodes(cbNode, cbNodes, node.elements);
     },
+    [SyntaxKind.ExistentialType]: forEachChildInUnionOrIntersectionType,
     [SyntaxKind.UnionType]: forEachChildInUnionOrIntersectionType,
     [SyntaxKind.IntersectionType]: forEachChildInUnionOrIntersectionType,
     [SyntaxKind.ConditionalType]: function forEachChildInConditionalType<T>(node: ConditionalTypeNode, cbNode: (node: Node) => T | undefined, _cbNodes?: (nodes: NodeArray<Node>) => T | undefined): T | undefined {
@@ -1138,7 +1140,7 @@ function forEachChildInCallOrConstructSignature<T>(node: CallSignatureDeclaratio
         visitNode(cbNode, node.type);
 }
 
-function forEachChildInUnionOrIntersectionType<T>(node: UnionTypeNode | IntersectionTypeNode, cbNode: (node: Node) => T | undefined, cbNodes?: (nodes: NodeArray<Node>) => T | undefined): T | undefined {
+function forEachChildInUnionOrIntersectionType<T>(node: ExistentialTypeNode | UnionTypeNode | IntersectionTypeNode, cbNode: (node: Node) => T | undefined, cbNodes?: (nodes: NodeArray<Node>) => T | undefined): T | undefined {
     return visitNodes(cbNode, cbNodes, node.types);
 }
 
@@ -4691,46 +4693,53 @@ namespace Parser {
         return allowConditionalTypesAnd(parsePostfixTypeOrHigher);
     }
 
+    function getFunctionTypeErrorDiagnostic(
+        operator: SyntaxKind.BarToken | SyntaxKind.AmpersandToken | SyntaxKind.CaretToken
+    ): DiagnosticMessage {
+        switch (operator) {
+            case SyntaxKind.CaretToken: return Diagnostics.Function_type_notation_must_be_parenthesized_when_used_in_an_existential_type;
+            case SyntaxKind.BarToken: return Diagnostics.Function_type_notation_must_be_parenthesized_when_used_in_a_union_type;
+            case SyntaxKind.AmpersandToken: return Diagnostics.Function_type_notation_must_be_parenthesized_when_used_in_an_intersection_type;
+        }
+    }
+
+    function getConstructorTypeErrorDiagnostic(
+        operator: SyntaxKind.BarToken | SyntaxKind.AmpersandToken | SyntaxKind.CaretToken
+    ): DiagnosticMessage {
+        switch (operator) {
+            case SyntaxKind.CaretToken: return Diagnostics.Function_type_notation_must_be_parenthesized_when_used_in_an_existential_type;
+            case SyntaxKind.BarToken: return Diagnostics.Function_type_notation_must_be_parenthesized_when_used_in_a_union_type;
+            case SyntaxKind.AmpersandToken: return Diagnostics.Function_type_notation_must_be_parenthesized_when_used_in_an_intersection_type;
+        }
+    }
+
     function parseFunctionOrConstructorTypeToError(
-        isInUnionType: boolean
+        operator: SyntaxKind.BarToken | SyntaxKind.AmpersandToken | SyntaxKind.CaretToken
     ): TypeNode | undefined {
         // the function type and constructor type shorthand notation
         // are not allowed directly in unions and intersections, but we'll
         // try to parse them gracefully and issue a helpful message.
         if (isStartOfFunctionTypeOrConstructorType()) {
             const type = parseFunctionOrConstructorType();
-            let diagnostic: DiagnosticMessage;
-            if (isFunctionTypeNode(type)) {
-                diagnostic = isInUnionType
-                    ? Diagnostics.Function_type_notation_must_be_parenthesized_when_used_in_a_union_type
-                    : Diagnostics.Function_type_notation_must_be_parenthesized_when_used_in_an_intersection_type;
-            }
-            else {
-                diagnostic = isInUnionType
-                    ? Diagnostics.Constructor_type_notation_must_be_parenthesized_when_used_in_a_union_type
-                    : Diagnostics.Constructor_type_notation_must_be_parenthesized_when_used_in_an_intersection_type;
-
-            }
-            parseErrorAtRange(type, diagnostic);
+            parseErrorAtRange(type, isFunctionTypeNode(type) ? getFunctionTypeErrorDiagnostic(operator) : getConstructorTypeErrorDiagnostic(operator));
             return type;
         }
         return undefined;
     }
 
     function parseUnionOrIntersectionType(
-        operator: SyntaxKind.BarToken | SyntaxKind.AmpersandToken,
+        operator: SyntaxKind.BarToken | SyntaxKind.AmpersandToken | SyntaxKind.CaretToken,
         parseConstituentType: () => TypeNode,
         createTypeNode: (types: NodeArray<TypeNode>) => UnionOrIntersectionTypeNode
     ): TypeNode {
         const pos = getNodePos();
-        const isUnionType = operator === SyntaxKind.BarToken;
         const hasLeadingOperator = parseOptional(operator);
-        let type = hasLeadingOperator && parseFunctionOrConstructorTypeToError(isUnionType)
+        let type = hasLeadingOperator && parseFunctionOrConstructorTypeToError(operator)
             || parseConstituentType();
         if (token() === operator || hasLeadingOperator) {
             const types = [type];
             while (parseOptional(operator)) {
-                types.push(parseFunctionOrConstructorTypeToError(isUnionType) || parseConstituentType());
+                types.push(parseFunctionOrConstructorTypeToError(operator) || parseConstituentType());
             }
             type = finishNode(createTypeNode(createNodeArray(types, pos)), pos);
         }
@@ -4743,6 +4752,10 @@ namespace Parser {
 
     function parseUnionTypeOrHigher(): TypeNode {
         return parseUnionOrIntersectionType(SyntaxKind.BarToken, parseIntersectionTypeOrHigher, factory.createUnionTypeNode);
+    }
+
+    function parseExistentialTypeOrHigher(): TypeNode {
+        return parseUnionOrIntersectionType(SyntaxKind.CaretToken, parseUnionTypeOrHigher, factory.createExistentialTypeNode);
     }
 
     function nextTokenIsNewKeyword(): boolean {
@@ -4844,7 +4857,7 @@ namespace Parser {
             return parseFunctionOrConstructorType();
         }
         const pos = getNodePos();
-        const type = parseUnionTypeOrHigher();
+        const type = parseExistentialTypeOrHigher();
         if (!inDisallowConditionalTypesContext() && !scanner.hasPrecedingLineBreak() && parseOptional(SyntaxKind.ExtendsKeyword)) {
             // The type following 'extends' is not permitted to be another conditional type
             const extendsType = disallowConditionalTypesAnd(parseType);

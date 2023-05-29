@@ -53,6 +53,7 @@ import {
     PropertyDeclaration,
     QualifiedName,
     ScriptTarget,
+    UnionOrIntersectionTypeNode,
     setParent,
     setTextRange,
     SignatureDeclaration,
@@ -65,7 +66,6 @@ import {
     TypePredicateNode,
     TypeReferenceNode,
     TypeReferenceSerializationKind,
-    UnionOrIntersectionTypeNode,
     VoidExpression,
 } from "../_namespaces/ts";
 
@@ -329,6 +329,9 @@ export function createRuntimeTypeSerializer(context: TransformationContext): Run
                 return serializeUnionOrIntersectionConstituents((node as UnionOrIntersectionTypeNode).types, /*isIntersection*/ true);
 
             case SyntaxKind.UnionType:
+                return serializeUnionOrIntersectionConstituents((node as UnionOrIntersectionTypeNode).types, /*isIntersection*/ false);
+
+            case SyntaxKind.ExistentialType:
                 return serializeUnionOrIntersectionConstituents((node as UnionOrIntersectionTypeNode).types, /*isIntersection*/ false);
 
             case SyntaxKind.ConditionalType:
