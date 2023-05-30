@@ -914,21 +914,16 @@ export type OneOfEnvironment = Map<OneOfType, AllOfType>;
 
 /** @internal */
 export interface OneOfContext {
-    scope?: OneOfScope;
-}
-
-/** @internal */
-export interface OneOfScope {
-    environment: OneOfEnvironment;
-    mapper: OneOfInstantiationMap;
-    allOfType: AllOfType;
+    iterationContext?: OneOfIterationContext;
 }
 
 /** @internal */
 export interface OneOfIterationContext {
     context: OneOfContext;
     allOfType: AllOfType;
+    environment: OneOfEnvironment;
     mappedOneOfs: Set<OneOfType>;
+    mapper: OneOfInstantiationMap;
     mappers: OneOfInstantiationMap[];
 }
 

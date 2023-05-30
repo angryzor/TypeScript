@@ -875,7 +875,6 @@ import {
     OneOfEnvironment,
     OneOfInstantiationMap,
     OneOfIterationContext,
-    OneOfScope,
     OneOfType,
     OptionalChain,
     OptionalTypeNode,
@@ -20418,27 +20417,23 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
     }
 
     function createOneOfContext(): OneOfContext {
-        return { scope: undefined };
+        return { iterationContext: undefined };
     }
 
-    function createOneOfScope(allOfType: AllOfType): OneOfScope {
-        return { mapper: undefined, environment: createOneOfEnvironment(), allOfType };
+    function pushOneOfIterationContext(context: OneOfContext, iterationContext: OneOfIterationContext) {
+        const savedOneOfIterationContext = context.iterationContext;
+        context.iterationContext = iterationContext;
+        return savedOneOfIterationContext;
     }
 
-    function pushOneOfScope(context: OneOfContext, scope: OneOfScope) {
-        const savedOneOfScope = context.scope;
-        context.scope = scope;
-        return savedOneOfScope;
-    }
-
-    function popOneOfScope(context: OneOfContext, parentScope: OneOfScope | undefined) {
-        Debug.assertIsDefined(context.scope, "popping oneof scope outside oneof scope");
+    function popOneOfIterationContext(context: OneOfContext, parentScope: OneOfIterationContext | undefined) {
+        Debug.assertIsDefined(context.iterationContext, "popping oneof iteration context outside oneof iteration context");
 
         if (parentScope) {
-            mergeOneOfEnvironments(parentScope.environment, context.scope.environment, context.scope.allOfType);
+            mergeOneOfEnvironments(parentScope.environment, context.iterationContext.environment, context.iterationContext.allOfType);
         }
 
-        context.scope = parentScope;
+        context.iterationContext = parentScope;
     }
 
     function isFreeAllOf(type: AllOfType) {
@@ -20463,25 +20458,26 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         return {
             context,
             allOfType,
+            environment: createOneOfEnvironment(),
             mappedOneOfs: new Set<OneOfType>(),
+            mapper: undefined,
             mappers: [undefined],
         };
     }
 
     function* oneOfInstantiations(iterationContext: OneOfIterationContext) {
-        const scope = createOneOfScope(iterationContext.allOfType);
-        const parentScope = pushOneOfScope(iterationContext.context, scope);
+        const parentIterationContext = pushOneOfIterationContext(iterationContext.context, iterationContext);
 
         try {
             while (hasPendingOneOfMappers(iterationContext)) {
                 const mapper = getCurrentOneOfMapper(iterationContext);
-                scope.mapper = mergeOneOfInstantiationMaps(parentScope?.mapper, mapper);
+                iterationContext.mapper = mergeOneOfInstantiationMaps(parentIterationContext?.mapper, mapper);
 
                 yield mapper;
             }
         }
         finally {
-            popOneOfScope(iterationContext.context, parentScope);
+            popOneOfIterationContext(iterationContext.context, parentIterationContext);
         }
     }
 
@@ -20492,12 +20488,10 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
     }
 
     function mapUnmappedFreeOneOfs(iterationContext: OneOfIterationContext) {
-        Debug.assertIsDefined(iterationContext.context.scope, "using oneof instantiation iteration context outside oneof scope");
-
         let conflictsFound = false;
         const newFreeOneOfs = [];
 
-        for (const [oneOf, bindingAllOf] of iterationContext.context.scope.environment) {
+        for (const [oneOf, bindingAllOf] of iterationContext.environment) {
             if (isFreeAllOf(bindingAllOf) && !iterationContext.mappedOneOfs.has(oneOf)) {
                 conflictsFound ||= bindingAllOf === freeWithConflictsAllOfType;
                 newFreeOneOfs.push(oneOf);
@@ -20534,45 +20528,45 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
     /*
      * OneOf public API.
      */
-    function getCurrentOneOfScope(context: OneOfContext) {
-        return context.scope;
+    function getCurrentOneOfIterationContext(context: OneOfContext) {
+        return context.iterationContext;
     }
 
     function createOneOfEnvironment(): OneOfEnvironment {
         return new Map<OneOfType, AllOfType>();
     }
 
-    function pushOneOfEnvironment(scope: OneOfScope, environment: OneOfEnvironment): OneOfEnvironment {
-        Debug.assertIsDefined(scope, "pushing oneof environment outside oneof scope");
+    function pushOneOfEnvironment(iterationContext: OneOfIterationContext, environment: OneOfEnvironment): OneOfEnvironment {
+        Debug.assertIsDefined(iterationContext, "pushing oneof environment outside oneof iteration context");
 
-        const savedEnvironment = scope.environment;
-        scope.environment = environment;
+        const savedEnvironment = iterationContext.environment;
+        iterationContext.environment = environment;
         return savedEnvironment;
     }
 
-    function mergeOneOfEnvironment(scope: OneOfScope, environment: OneOfEnvironment) {
-        Debug.assertIsDefined(scope, "merging oneof environment outside oneof scope");
+    function mergeOneOfEnvironment(iterationContext: OneOfIterationContext, environment: OneOfEnvironment) {
+        Debug.assertIsDefined(iterationContext, "merging oneof environment outside oneof iteration context");
 
-        mergeOneOfEnvironments(scope.environment, environment);
+        mergeOneOfEnvironments(iterationContext.environment, environment);
     }
 
-    function popOneOfEnvironment(scope: OneOfScope, parentEnvironment: OneOfEnvironment) {
-        Debug.assertIsDefined(scope, "popping oneof environment outside oneof scope");
+    function popOneOfEnvironment(iterationContext: OneOfIterationContext, parentEnvironment: OneOfEnvironment) {
+        Debug.assertIsDefined(iterationContext, "popping oneof environment outside oneof iteration context");
 
-        const environment = scope.environment;
-        scope.environment = parentEnvironment;
+        const environment = iterationContext.environment;
+        iterationContext.environment = parentEnvironment;
 
-        mergeOneOfEnvironment(scope, environment);
+        mergeOneOfEnvironment(iterationContext, environment);
     }
 
-    function getOneOfSubstitution(scope: OneOfScope, oneOf: OneOfType) {
+    function getOneOfSubstitution(iterationContext: OneOfIterationContext, oneOf: OneOfType) {
         let mappedType: Type;
 
-        if (scope.mapper && (mappedType = getMappedType(oneOf, scope.mapper)) !== oneOf) {
+        if (iterationContext.mapper && (mappedType = getMappedType(oneOf, iterationContext.mapper)) !== oneOf) {
             return mappedType;
         }
 
-        discoverOneOf(scope.environment, oneOf);
+        discoverOneOf(iterationContext.environment, oneOf);
         return oneOf.origin.flags & TypeFlags.Union ? (oneOf.origin as UnionType).types[(oneOf.origin as UnionType).types.length - 1] : oneOf.origin;
     }
 
@@ -21072,8 +21066,8 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
 
                 traceUnionsOrIntersectionsTooLarge(source, target);
 
-                const skipCaching = source.flags & TypeFlags.Union && (source as UnionType).types.length < 4 && !(target.flags & TypeFlags.Union) && targetOneOfContext && getCurrentOneOfScope(targetOneOfContext) ||
-                    target.flags & TypeFlags.Union && (target as UnionType).types.length < 4 && !(source.flags & TypeFlags.StructuredOrInstantiable) && sourceOneOfContext && getCurrentOneOfScope(sourceOneOfContext);
+                const skipCaching = source.flags & TypeFlags.Union && (source as UnionType).types.length < 4 && !(target.flags & TypeFlags.Union) && targetOneOfContext && getCurrentOneOfIterationContext(targetOneOfContext) ||
+                    target.flags & TypeFlags.Union && (target as UnionType).types.length < 4 && !(source.flags & TypeFlags.StructuredOrInstantiable) && sourceOneOfContext && getCurrentOneOfIterationContext(sourceOneOfContext);
                 const result = skipCaching ?
                     unionOrIntersectionRelatedTo(source, target, reportErrors, intersectionState) :
                     recursiveTypeRelatedTo(source, target, reportErrors, intersectionState, recursionFlags);
@@ -21542,9 +21536,9 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 sourceOneOfContext = createOneOfContext();
                 targetOneOfContext = createOneOfContext();
             }
-            const sourceOneOfScope = getCurrentOneOfScope(sourceOneOfContext);
-            const targetOneOfScope = getCurrentOneOfScope(targetOneOfContext);
-            const id = getRelationKey(source, target, intersectionState, relation, /*ignoreConstraints*/ false, sourceOneOfScope, targetOneOfScope);
+            const sourceOneOfIterationContext = getCurrentOneOfIterationContext(sourceOneOfContext);
+            const targetOneOfIterationContext = getCurrentOneOfIterationContext(targetOneOfContext);
+            const id = getRelationKey(source, target, intersectionState, relation, /*ignoreConstraints*/ false, sourceOneOfIterationContext, targetOneOfIterationContext);
             const entry = relation.get(id);
             if (entry !== undefined) {
                 if (reportErrors && entry.result & RelationComparisonResult.Failed && !(entry.result & RelationComparisonResult.Reported)) {
@@ -21562,11 +21556,11 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                             instantiateType(source, reportUnreliableMapper);
                         }
                     }
-                    if (sourceOneOfScope && entry.sourceOneOfEnvironment) {
-                        mergeOneOfEnvironment(sourceOneOfScope, entry.sourceOneOfEnvironment);
+                    if (sourceOneOfIterationContext && entry.sourceOneOfEnvironment) {
+                        mergeOneOfEnvironment(sourceOneOfIterationContext, entry.sourceOneOfEnvironment);
                     }
-                    if (targetOneOfScope && entry.targetOneOfEnvironment) {
-                        mergeOneOfEnvironment(targetOneOfScope, entry.targetOneOfEnvironment);
+                    if (targetOneOfIterationContext && entry.targetOneOfEnvironment) {
+                        mergeOneOfEnvironment(targetOneOfIterationContext, entry.targetOneOfEnvironment);
                     }
                     return entry.result & RelationComparisonResult.Succeeded ? Ternary.True : Ternary.False;
                 }
@@ -21580,7 +21574,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 // A key that starts with "*" is an indication that we have type references that reference constrained
                 // type parameters. For such keys we also check against the key we would have gotten if all type parameters
                 // were unconstrained.
-                const broadestEquivalentId = id.startsWith("*") ? getRelationKey(source, target, intersectionState, relation, /*ignoreConstraints*/ true, sourceOneOfScope, targetOneOfScope) : undefined;
+                const broadestEquivalentId = id.startsWith("*") ? getRelationKey(source, target, intersectionState, relation, /*ignoreConstraints*/ true, sourceOneOfIterationContext, targetOneOfIterationContext) : undefined;
                 for (let i = 0; i < maybeCount; i++) {
                     // If source and target are already being compared, consider them related with assumptions
                     if (id === maybeKeys[i] || broadestEquivalentId && broadestEquivalentId === maybeKeys[i]) {
@@ -21598,13 +21592,13 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             let saveSourceOneOfEnvironment: OneOfEnvironment | undefined;
             let saveTargetOneOfEnvironment: OneOfEnvironment | undefined;
 
-            if (sourceOneOfScope) {
+            if (sourceOneOfIterationContext) {
                 sourceOneOfEnvironment = createOneOfEnvironment();
-                saveSourceOneOfEnvironment = pushOneOfEnvironment(sourceOneOfScope, sourceOneOfEnvironment);
+                saveSourceOneOfEnvironment = pushOneOfEnvironment(sourceOneOfIterationContext, sourceOneOfEnvironment);
             }
-            if (targetOneOfScope) {
+            if (targetOneOfIterationContext) {
                 targetOneOfEnvironment = createOneOfEnvironment();
-                saveTargetOneOfEnvironment = pushOneOfEnvironment(targetOneOfScope, targetOneOfEnvironment);
+                saveTargetOneOfEnvironment = pushOneOfEnvironment(targetOneOfIterationContext, targetOneOfEnvironment);
             }
 
             const maybeStart = maybeCount;
@@ -21677,11 +21671,11 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 relation.set(id, { result: (reportErrors ? RelationComparisonResult.Reported : 0) | RelationComparisonResult.Failed | propagatingVarianceFlags, sourceOneOfEnvironment, targetOneOfEnvironment });
                 maybeCount = maybeStart;
             }
-            if (targetOneOfScope && saveTargetOneOfEnvironment) {
-                popOneOfEnvironment(targetOneOfScope, saveTargetOneOfEnvironment);
+            if (targetOneOfIterationContext && saveTargetOneOfEnvironment) {
+                popOneOfEnvironment(targetOneOfIterationContext, saveTargetOneOfEnvironment);
             }
-            if (sourceOneOfScope && saveSourceOneOfEnvironment) {
-                popOneOfEnvironment(sourceOneOfScope, saveSourceOneOfEnvironment);
+            if (sourceOneOfIterationContext && saveSourceOneOfEnvironment) {
+                popOneOfEnvironment(sourceOneOfIterationContext, saveSourceOneOfEnvironment);
             }
             return result;
         }
@@ -21751,15 +21745,15 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             let varianceCheckFailed = false;
             let sourceFlags = source.flags;
             const targetFlags = target.flags;
-            const sourceOneOfScope = getCurrentOneOfScope(sourceOneOfContext);
-            const targetOneOfScope = getCurrentOneOfScope(targetOneOfContext);
+            const sourceOneOfIterationContext = getCurrentOneOfIterationContext(sourceOneOfContext);
+            const targetOneOfIterationContext = getCurrentOneOfIterationContext(targetOneOfContext);
 
-            if (!sourceOneOfScope) {
+            if (!sourceOneOfIterationContext) {
                 result = eachOneOfInstantiationRelatedToType(source, target, reportErrors, intersectionState);
                 overrideNextErrorInfo++;
                 return result;
             }
-            if (!targetOneOfScope) {
+            if (!targetOneOfIterationContext) {
                 result = typeRelatedToSomeOneOfInstantiation(source, target, reportErrors, intersectionState);
                 overrideNextErrorInfo++;
                 return result;
@@ -21771,22 +21765,22 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 return typeRelatedToSomeOneOfInstantiation(source, (target as AllOfType).origin, reportErrors, intersectionState, (target as AllOfType));
             }
             if (source.flags & TypeFlags.OneOf) {
-                return isRelatedTo(getOneOfSubstitution(sourceOneOfScope, source as OneOfType), target, RecursionFlags.None, reportErrors, /*headMessage*/ undefined, intersectionState);
+                return isRelatedTo(getOneOfSubstitution(sourceOneOfIterationContext, source as OneOfType), target, RecursionFlags.None, reportErrors, /*headMessage*/ undefined, intersectionState);
             }
             if (target.flags & TypeFlags.OneOf) {
-                return isRelatedTo(source, getOneOfSubstitution(targetOneOfScope, target as OneOfType), RecursionFlags.None, reportErrors, /*headMessage*/ undefined, intersectionState);
+                return isRelatedTo(source, getOneOfSubstitution(targetOneOfIterationContext, target as OneOfType), RecursionFlags.None, reportErrors, /*headMessage*/ undefined, intersectionState);
             }
             if (source.flags & TypeFlags.IndexedAccess && (source as IndexedAccessType).objectType.flags & TypeFlags.OneOf) {
                 const oneOfType = (source as IndexedAccessType).objectType as OneOfType;
                 const indexType = (source as IndexedAccessType).indexType;
-                const instantiatedIndexedAccess = getIndexedAccessType(getOneOfSubstitution(sourceOneOfScope, oneOfType), indexType);
+                const instantiatedIndexedAccess = getIndexedAccessType(getOneOfSubstitution(sourceOneOfIterationContext, oneOfType), indexType);
 
                 return isRelatedTo(instantiatedIndexedAccess, target, RecursionFlags.None, reportErrors, /*headMessage*/ undefined, intersectionState);
             }
             if (target.flags & TypeFlags.IndexedAccess && (target as IndexedAccessType).objectType.flags & TypeFlags.OneOf) {
                 const oneOfType = (target as IndexedAccessType).objectType as OneOfType;
                 const indexType = (target as IndexedAccessType).indexType;
-                const instantiatedIndexedAccess = getIndexedAccessType(getOneOfSubstitution(targetOneOfScope, oneOfType), indexType);
+                const instantiatedIndexedAccess = getIndexedAccessType(getOneOfSubstitution(targetOneOfIterationContext, oneOfType), indexType);
 
                 return isRelatedTo(source, instantiatedIndexedAccess, RecursionFlags.None, reportErrors, /*headMessage*/ undefined, intersectionState);
             }
@@ -23373,7 +23367,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
      * To improve caching, the relation key for two generic types uses the target's id plus ids of the type parameters.
      * For other cases, the types ids are used.
      */
-    function getRelationKey(source: Type, target: Type, intersectionState: IntersectionState, relation: Map<string, RelationEntry>, ignoreConstraints: boolean, sourceOneOfScope?: OneOfScope, targetOneOfScope?: OneOfScope) {
+    function getRelationKey(source: Type, target: Type, intersectionState: IntersectionState, relation: Map<string, RelationEntry>, ignoreConstraints: boolean, sourceOneOfIterationContext?: OneOfIterationContext, targetOneOfIterationContext?: OneOfIterationContext) {
         if (relation === identityRelation && source.id > target.id) {
             const temp = source;
             source = target;
@@ -23382,9 +23376,9 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         const postFix = `${
             intersectionState ? ":" + intersectionState : ""
         }|${
-            sourceOneOfScope && getRelationKeyTypeMapperSuffix(sourceOneOfScope.mapper)
+            sourceOneOfIterationContext && getRelationKeyTypeMapperSuffix(sourceOneOfIterationContext.mapper)
         }|${
-            targetOneOfScope && getRelationKeyTypeMapperSuffix(targetOneOfScope.mapper)
+            targetOneOfIterationContext && getRelationKeyTypeMapperSuffix(targetOneOfIterationContext.mapper)
         }`;
         return isTypeReferenceWithGenericArguments(source) && isTypeReferenceWithGenericArguments(target) ?
             getGenericTypeReferenceRelationKey(source as TypeReference, target as TypeReference, postFix, ignoreConstraints) :
@@ -24905,16 +24899,16 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 // And if there weren't any type arguments, there's no reason to run inference as the types must be the same.
                 return;
             }
-            const sourceOneOfScope = getCurrentOneOfScope(sourceOneOfContext);
-            const targetOneOfScope = getCurrentOneOfScope(targetOneOfContext);
-            if (!targetOneOfScope) {
+            const sourceOneOfIterationContext = getCurrentOneOfIterationContext(sourceOneOfContext);
+            const targetOneOfIterationContext = getCurrentOneOfIterationContext(targetOneOfContext);
+            if (!targetOneOfIterationContext) {
                 if (!didRootTargetAllOf) {
                     didRootTargetAllOf = true;
                     inferToMultipleTypes(source, [target], freeAllOfType);
                     return;
                 }
             }
-            if (!sourceOneOfScope) {
+            if (!sourceOneOfIterationContext) {
                 inferFromOneOfInstantiations(source, target);
                 return;
             }
@@ -25079,11 +25073,11 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 inferFromTypes((source as OneOfType).origin, (target as OneOfType).origin);
             }
             else if (source.flags & TypeFlags.OneOf) {
-                inferFromTypes(getOneOfSubstitution(sourceOneOfScope, source as OneOfType), target);
+                inferFromTypes(getOneOfSubstitution(sourceOneOfIterationContext, source as OneOfType), target);
             }
             else if (target.flags & TypeFlags.OneOf) {
-                Debug.assertIsDefined(targetOneOfScope, "oneof encountered outside oneof scope during inferencing");
-                inferFromTypes(source, getOneOfSubstitution(targetOneOfScope, target as OneOfType));
+                Debug.assertIsDefined(targetOneOfIterationContext, "oneof encountered outside oneof scope during inferencing");
+                inferFromTypes(source, getOneOfSubstitution(targetOneOfIterationContext, target as OneOfType));
             }
             else if (target.flags & TypeFlags.Conditional) {
                 invokeOnce(source, (target as ConditionalType), inferToConditionalType);
