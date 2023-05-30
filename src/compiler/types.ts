@@ -6876,6 +6876,8 @@ export const enum InferenceFlags {
     NoDefault       = 1 << 0,  // Infer unknownType for no inferences (otherwise anyType or emptyObjectType)
     AnyDefault      = 1 << 1,  // Infer anyType for no inferences (otherwise emptyObjectType)
     SkippedGenericFunction = 1 << 2, // A generic function was skipped during inference
+    UnionRequired          = 1 << 3, // The type parameter appeared in an inference site that only accepts unions or unary types
+    OneOfRequired          = 1 << 4, // The type parameter appeared in an inference site that only accepts oneofs or unary types
 }
 
 /**

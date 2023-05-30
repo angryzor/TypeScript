@@ -1400,6 +1400,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
     // Why var? It avoids TDZ checks in the runtime which can be costly.
     // See: https://github.com/microsoft/TypeScript/issues/52924
     /* eslint-disable no-var */
+    var indent = "";
     var getPackagesMap = memoize(() => {
         // A package name maps to true when we detect it has .d.ts files.
         // This is useful as an approximation of whether a package bundles its own types.
@@ -21539,6 +21540,8 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             const sourceOneOfIterationContext = getCurrentOneOfIterationContext(sourceOneOfContext);
             const targetOneOfIterationContext = getCurrentOneOfIterationContext(targetOneOfContext);
             const id = getRelationKey(source, target, intersectionState, relation, /*ignoreConstraints*/ false, sourceOneOfIterationContext, targetOneOfIterationContext);
+            console.log(indent, getTypeNameForErrorDisplay(source), "<=>", getTypeNameForErrorDisplay(target), "cache id", id);
+            indent = (indent ?? "") + "   ";
             const entry = relation.get(id);
             if (entry !== undefined) {
                 if (reportErrors && entry.result & RelationComparisonResult.Failed && !(entry.result & RelationComparisonResult.Reported)) {
@@ -21562,6 +21565,8 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                     if (targetOneOfIterationContext && entry.targetOneOfEnvironment) {
                         mergeOneOfEnvironment(targetOneOfIterationContext, entry.targetOneOfEnvironment);
                     }
+                    indent = indent.slice(0, indent.length - 3);
+                    console.log(indent, getTypeNameForErrorDisplay(source), "<=>", getTypeNameForErrorDisplay(target), "cached result:", entry.result);
                     return entry.result & RelationComparisonResult.Succeeded ? Ternary.True : Ternary.False;
                 }
             }
@@ -21677,6 +21682,8 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             if (sourceOneOfIterationContext && saveSourceOneOfEnvironment) {
                 popOneOfEnvironment(sourceOneOfIterationContext, saveSourceOneOfEnvironment);
             }
+            indent = indent.slice(0, indent.length - 3);
+            console.log(indent, getTypeNameForErrorDisplay(source), "<=>", getTypeNameForErrorDisplay(target), "result:", result);
             return result;
         }
 
@@ -24901,23 +24908,13 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             }
             const sourceOneOfIterationContext = getCurrentOneOfIterationContext(sourceOneOfContext);
             const targetOneOfIterationContext = getCurrentOneOfIterationContext(targetOneOfContext);
-            if (!targetOneOfIterationContext) {
-                if (!didRootTargetAllOf) {
-                    didRootTargetAllOf = true;
-                    inferToMultipleTypes(source, [target], freeAllOfType);
-                    return;
-                }
+            if (!targetOneOfIterationContext && !didRootTargetAllOf) {
+                didRootTargetAllOf = true;
+                inferToMultipleTypes(source, [target], freeAllOfType);
+                return;
             }
             if (!sourceOneOfIterationContext) {
                 inferFromOneOfInstantiations(source, target);
-                return;
-            }
-            else if (target.flags & TypeFlags.AllOf) {
-                inferToMultipleTypes(source, [(target as AllOfType).origin], target as AllOfType);
-                return;
-            }
-            else if (source.flags & TypeFlags.AllOf) {
-                inferFromOneOfInstantiations((source as AllOfType).origin, target, source as AllOfType);
                 return;
             }
             if (source === target && source.flags & TypeFlags.UnionOrIntersection) {
@@ -25069,14 +25066,15 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 inferFromTypes((source as SubstitutionType).baseType, target);
                 inferWithPriority(getSubstitutionIntersection(source as SubstitutionType), target, InferencePriority.SubstituteSource); // Make substitute inference at a lower priority
             }
-            else if (source.flags & TypeFlags.OneOf && target.flags & TypeFlags.OneOf) {
-                inferFromTypes((source as OneOfType).origin, (target as OneOfType).origin);
-            }
+            // else if (source.flags & TypeFlags.OneOf && target.flags & TypeFlags.OneOf) {
+            //     inferFromTypes((source as OneOfType).origin, (target as OneOfType).origin);
+            // }
             else if (source.flags & TypeFlags.OneOf) {
+                Debug.assertIsDefined(sourceOneOfIterationContext, "oneof encountered outside oneof iteration during inferencing");
                 inferFromTypes(getOneOfSubstitution(sourceOneOfIterationContext, source as OneOfType), target);
             }
             else if (target.flags & TypeFlags.OneOf) {
-                Debug.assertIsDefined(targetOneOfIterationContext, "oneof encountered outside oneof scope during inferencing");
+                Debug.assertIsDefined(targetOneOfIterationContext, "oneof encountered outside oneof iteration during inferencing");
                 inferFromTypes(source, getOneOfSubstitution(targetOneOfIterationContext, target as OneOfType));
             }
             else if (target.flags & TypeFlags.Conditional) {
@@ -25091,6 +25089,14 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 for (const sourceType of sourceTypes) {
                     inferFromTypes(sourceType, target);
                 }
+            }
+            else if (target.flags & TypeFlags.AllOf) {
+                inferToMultipleTypes(source, [(target as AllOfType).origin], target as AllOfType);
+                return;
+            }
+            else if (source.flags & TypeFlags.AllOf) {
+                inferFromOneOfInstantiations((source as AllOfType).origin, target, source as AllOfType);
+                return;
             }
             else if (target.flags & TypeFlags.TemplateLiteral) {
                 inferToTemplateLiteralType(source, target as TemplateLiteralType);
