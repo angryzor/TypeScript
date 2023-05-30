@@ -6275,7 +6275,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 mapper.targets,
                 (s, t) => `${getTypeNameForErrorDisplay(s)} -> ${getTypeNameForErrorDisplay(t())}`).join(", ");
             case TypeMapKind.Merged:
-            case TypeMapKind.Composite: return `m1: ${getTypeMapperMappingsForErrorDisplay(mapper.mapper1)}, ${getTypeMapperMappingsForErrorDisplay(mapper.mapper2)}`;
+            case TypeMapKind.Composite: return `${getTypeMapperMappingsForErrorDisplay(mapper.mapper1)}, ${getTypeMapperMappingsForErrorDisplay(mapper.mapper2)}`;
             default: return Debug.assertNever(mapper);
         }
     }
@@ -24918,16 +24918,12 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 inferFromOneOfInstantiations(source, target);
                 return;
             }
-            else if (source.flags & TypeFlags.AllOf && target.flags & TypeFlags.AllOf) {
-                inferFromTypes((source as AllOfType).origin, (target as AllOfType).origin);
-                return;
-            }
             else if (target.flags & TypeFlags.AllOf) {
                 inferToMultipleTypes(source, [(target as AllOfType).origin], target as AllOfType);
                 return;
             }
             else if (source.flags & TypeFlags.AllOf) {
-                inferFromOneOfInstantiations((source as AllOfType).origin, target);
+                inferFromOneOfInstantiations((source as AllOfType).origin, target, source as AllOfType);
                 return;
             }
             if (source === target && source.flags & TypeFlags.UnionOrIntersection) {
