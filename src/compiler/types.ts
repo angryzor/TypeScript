@@ -6861,8 +6861,8 @@ export const enum InferencePriority {
 /** @internal */
 export interface InferenceInfo {
     typeParameter: TypeParameter;            // Type parameter for which inferences are being made
-    candidates: Type[] | undefined;          // Candidates in covariant positions (or undefined)
-    contraCandidates: Type[] | undefined;    // Candidates in contravariant positions (or undefined)
+    candidates: Map<string, Type[]>;          // Candidates in covariant positions (or undefined)
+    contraCandidates: Map<string, Type[]>;    // Candidates in contravariant positions (or undefined)
     inferredType?: Type;                     // Cache for resolved inferred type
     priority?: InferencePriority;            // Priority of current inference set
     topLevel: boolean;                       // True if all inferences are to top level occurrences
@@ -6876,8 +6876,6 @@ export const enum InferenceFlags {
     NoDefault       = 1 << 0,  // Infer unknownType for no inferences (otherwise anyType or emptyObjectType)
     AnyDefault      = 1 << 1,  // Infer anyType for no inferences (otherwise emptyObjectType)
     SkippedGenericFunction = 1 << 2, // A generic function was skipped during inference
-    UnionRequired          = 1 << 3, // The type parameter appeared in an inference site that only accepts unions or unary types
-    OneOfRequired          = 1 << 4, // The type parameter appeared in an inference site that only accepts oneofs or unary types
 }
 
 /**

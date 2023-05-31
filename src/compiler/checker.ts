@@ -24471,8 +24471,8 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
     function createInferenceInfo(typeParameter: TypeParameter): InferenceInfo {
         return {
             typeParameter,
-            candidates: undefined,
-            contraCandidates: undefined,
+            candidates: new Map<string, Type[]>(),
+            contraCandidates: new Map<string, Type[]>(),
             inferredType: undefined,
             priority: undefined,
             topLevel: true,
@@ -24484,8 +24484,8 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
     function cloneInferenceInfo(inference: InferenceInfo): InferenceInfo {
         return {
             typeParameter: inference.typeParameter,
-            candidates: inference.candidates && inference.candidates.slice(),
-            contraCandidates: inference.contraCandidates && inference.contraCandidates.slice(),
+            candidates: new Map<string, Type[]>(inference.candidates),
+            contraCandidates: new Map<string, Type[]>(inference.contraCandidates),
             inferredType: inference.inferredType,
             priority: inference.priority,
             topLevel: inference.topLevel,
@@ -24685,10 +24685,15 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
     }
 
     function getTypeFromInference(inference: InferenceInfo) {
-        return inference.candidates ? getUnionType(inference.candidates, UnionReduction.Subtype) :
-            inference.contraCandidates ? getIntersectionType(inference.contraCandidates) :
-            undefined;
-    }
+        if (inference.candidates) {
+            const candidateUnions = [...inference.candidates.values()].map(t => inference.isOneOfArgument ? getCommonSupertype(t) : getOneOfType(getUnionType(t, UnionReduction.Subtype)));
+            return inference.isAllOfArgument ? getCommonSupertype(candidateUnions) : getUnionType(candidateUnions, UnionReduction.Subtype);
+        }
+        if (inference.contraCandidates) {
+            const candidateIntersections = [...inference.contraCandidates.values()].map(t => inference.isOneOfArgument ? getCommonSubtype(t) : getIntersectionType(t));
+            return inference.isAllOfArgument ? getCommonSubtype(candidateIntersections) : getIntersectionType(candidateIntersections);
+        }
+        return undefined
 
     function hasSkipDirectInferenceFlag(node: Node) {
         return !!getNodeLinks(node).skipDirectInference;
@@ -24994,9 +24999,10 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                         return;
                     }
                     if (!inference.isFixed) {
+                        const candidateKey = `${getRelationKeyTypeMapperSuffix(sourceOneOfIterationContext.mapper)}|${getRelationKeyTypeMapperSuffix(targetOneOfIterationContext?.mapper)}`;
                         if (inference.priority === undefined || priority < inference.priority) {
-                            inference.candidates = undefined;
-                            inference.contraCandidates = undefined;
+                            inference.candidates.delete(candidateKey);
+                            inference.contraCandidates.delete(candidateKey);
                             inference.topLevel = true;
                             inference.priority = priority;
                         }
@@ -25005,14 +25011,18 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                             // We make contravariant inferences only if we are in a pure contravariant position,
                             // i.e. only if we have not descended into a bivariant position.
                             if (contravariant && !bivariant) {
-                                if (!contains(inference.contraCandidates, candidate)) {
-                                    inference.contraCandidates = append(inference.contraCandidates, candidate);
+                                const contraCandidates = inference.contraCandidates.get(candidateKey);
+                                if (!contains(contraCandidates, candidate)) {
+                                    inference.contraCandidates.set(candidateKey, append(contraCandidates, candidate));
                                     clearCachedInferences(inferences);
                                 }
                             }
-                            else if (!contains(inference.candidates, candidate)) {
-                                inference.candidates = append(inference.candidates, candidate);
-                                clearCachedInferences(inferences);
+                            else {
+                                const candidates = inference.candidates.get(candidateKey);
+                                if (!contains(candidates, candidate)) {
+                                    inference.candidates.set(candidateKey, append(candidates, candidate));
+                                    clearCachedInferences(inferences);
+                                }
                             }
                         }
                         if (!(priority & InferencePriority.ReturnType) && target.flags & TypeFlags.TypeParameter && inference.topLevel && !isTypeParameterAtTopLevel(originalTarget, target as TypeParameter)) {
@@ -25074,8 +25084,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 inferFromTypes(getOneOfSubstitution(sourceOneOfIterationContext, source as OneOfType), target);
             }
             else if (target.flags & TypeFlags.OneOf) {
-                Debug.assertIsDefined(targetOneOfIterationContext, "oneof encountered outside oneof iteration during inferencing");
-                inferFromTypes(source, getOneOfSubstitution(targetOneOfIterationContext, target as OneOfType));
+                inferFromTypes(getAllOfType(source.flags & TypeFlags.Union ? getCommonSupertype((source as UnionType).types) : source), (target as OneOfType).origin);
             }
             else if (target.flags & TypeFlags.Conditional) {
                 invokeOnce(source, (target as ConditionalType), inferToConditionalType);
@@ -25090,12 +25099,12 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                     inferFromTypes(sourceType, target);
                 }
             }
-            else if (target.flags & TypeFlags.AllOf) {
-                inferToMultipleTypes(source, [(target as AllOfType).origin], target as AllOfType);
-                return;
-            }
             else if (source.flags & TypeFlags.AllOf) {
                 inferFromOneOfInstantiations((source as AllOfType).origin, target, source as AllOfType);
+                return;
+            }
+            else if (target.flags & TypeFlags.AllOf) {
+                inferToMultipleTypes(source, [(target as AllOfType).origin], target as AllOfType);
                 return;
             }
             else if (target.flags & TypeFlags.TemplateLiteral) {
@@ -25713,30 +25722,30 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         return candidates;
     }
 
-    function getContravariantInference(inference: InferenceInfo) {
-        return inference.priority! & InferencePriority.PriorityImpliesCombination ? getIntersectionType(inference.contraCandidates!) : getCommonSubtype(inference.contraCandidates!);
-    }
+    // function getContravariantInference(inference: InferenceInfo) {
+    //     return inference.priority! & InferencePriority.PriorityImpliesCombination ? getIntersectionType(inference.contraCandidates!) : getCommonSubtype(inference.contraCandidates!);
+    // }
 
-    function getCovariantInference(inference: InferenceInfo, signature: Signature) {
-        // Extract all object and array literal types and replace them with a single widened and normalized type.
-        const candidates = unionObjectAndArrayLiteralCandidates(inference.candidates!);
-        // We widen inferred literal types if
-        // all inferences were made to top-level occurrences of the type parameter, and
-        // the type parameter has no constraint or its constraint includes no primitive or literal types, and
-        // the type parameter was fixed during inference or does not occur at top-level in the return type.
-        const primitiveConstraint = hasPrimitiveConstraint(inference.typeParameter) || isConstTypeVariable(inference.typeParameter);
-        const widenLiteralTypes = !primitiveConstraint && inference.topLevel &&
-            (inference.isFixed || !isTypeParameterAtTopLevelInReturnType(signature, inference.typeParameter));
-        const baseCandidates = primitiveConstraint ? sameMap(candidates, getRegularTypeOfLiteralType) :
-            widenLiteralTypes ? sameMap(candidates, getWidenedLiteralType) :
-            candidates;
-        // If all inferences were made from a position that implies a combined result, infer a union type.
-        // Otherwise, infer a common supertype.
-        const unwidenedType = inference.priority! & InferencePriority.PriorityImpliesCombination ?
-            getUnionType(baseCandidates, UnionReduction.Subtype) :
-            getCommonSupertype(baseCandidates);
-        return getWidenedType(unwidenedType);
-    }
+    // function getCovariantInference(inference: InferenceInfo, signature: Signature) {
+    //     // Extract all object and array literal types and replace them with a single widened and normalized type.
+    //     const candidates = unionObjectAndArrayLiteralCandidates(inference.candidates!);
+    //     // We widen inferred literal types if
+    //     // all inferences were made to top-level occurrences of the type parameter, and
+    //     // the type parameter has no constraint or its constraint includes no primitive or literal types, and
+    //     // the type parameter was fixed during inference or does not occur at top-level in the return type.
+    //     const primitiveConstraint = hasPrimitiveConstraint(inference.typeParameter) || isConstTypeVariable(inference.typeParameter);
+    //     const widenLiteralTypes = !primitiveConstraint && inference.topLevel &&
+    //         (inference.isFixed || !isTypeParameterAtTopLevelInReturnType(signature, inference.typeParameter));
+    //     const baseCandidates = primitiveConstraint ? sameMap(candidates, getRegularTypeOfLiteralType) :
+    //         widenLiteralTypes ? sameMap(candidates, getWidenedLiteralType) :
+    //         candidates;
+    //     // If all inferences were made from a position that implies a combined result, infer a union type.
+    //     // Otherwise, infer a common supertype.
+    //     const unwidenedType = inference.priority! & InferencePriority.PriorityImpliesCombination ?
+    //         getUnionType(baseCandidates, UnionReduction.Subtype) :
+    //         getCommonSupertype(baseCandidates);
+    //     return getWidenedType(unwidenedType);
+    // }
 
     function getInferredType(context: InferenceContext, index: number): Type {
         const inference = context.inferences[index];
@@ -25744,38 +25753,38 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             let inferredType: Type | undefined;
             const signature = context.signature;
             if (signature) {
-                const inferredCovariantType = inference.candidates ? getCovariantInference(inference, signature) : undefined;
-                if (inference.contraCandidates) {
-                    // If we have both co- and contra-variant inferences, we use the co-variant inference if it is not 'never',
-                    // it is a subtype of some contra-variant inference, and no other type parameter is constrained to this type
-                    // parameter and has inferences that would conflict. Otherwise, we use the contra-variant inference.
-                    const useCovariantType = inferredCovariantType && !(inferredCovariantType.flags & TypeFlags.Never) &&
-                        some(inference.contraCandidates, t => isTypeSubtypeOf(inferredCovariantType, t)) &&
-                        every(context.inferences, other =>
-                            other !== inference && getConstraintOfTypeParameter(other.typeParameter) !== inference.typeParameter ||
-                            every(other.candidates, t => isTypeSubtypeOf(t, inferredCovariantType)));
-                    inferredType = useCovariantType ? inferredCovariantType : getContravariantInference(inference);
-                }
-                else if (inferredCovariantType) {
-                    inferredType = inferredCovariantType;
-                }
-                else if (context.flags & InferenceFlags.NoDefault) {
-                    // We use silentNeverType as the wildcard that signals no inferences.
-                    inferredType = silentNeverType;
-                }
-                else {
-                    // Infer either the default or the empty object type when no inferences were
-                    // made. It is important to remember that in this case, inference still
-                    // succeeds, meaning there is no error for not having inference candidates. An
-                    // inference error only occurs when there are *conflicting* candidates, i.e.
-                    // candidates with no common supertype.
-                    const defaultType = getDefaultFromTypeParameter(inference.typeParameter);
-                    if (defaultType) {
-                        // Instantiate the default type. Any forward reference to a type
-                        // parameter should be instantiated to the empty object type.
-                        inferredType = instantiateType(defaultType, mergeTypeMappers(createBackreferenceMapper(context, index), context.nonFixingMapper));
-                    }
-                }
+                // const inferredCovariantType = inference.candidates ? getCovariantInference(inference, signature) : undefined;
+                // if (inference.contraCandidates) {
+                //     // If we have both co- and contra-variant inferences, we use the co-variant inference if it is not 'never',
+                //     // it is a subtype of some contra-variant inference, and no other type parameter is constrained to this type
+                //     // parameter and has inferences that would conflict. Otherwise, we use the contra-variant inference.
+                //     const useCovariantType = inferredCovariantType && !(inferredCovariantType.flags & TypeFlags.Never) &&
+                //         some(inference.contraCandidates, t => isTypeSubtypeOf(inferredCovariantType, t)) &&
+                //         every(context.inferences, other =>
+                //             other !== inference && getConstraintOfTypeParameter(other.typeParameter) !== inference.typeParameter ||
+                //             every(other.candidates, t => isTypeSubtypeOf(t, inferredCovariantType)));
+                //     inferredType = useCovariantType ? inferredCovariantType : getContravariantInference(inference);
+                // }
+                // else if (inferredCovariantType) {
+                //     inferredType = inferredCovariantType;
+                // }
+                // else if (context.flags & InferenceFlags.NoDefault) {
+                //     // We use silentNeverType as the wildcard that signals no inferences.
+                //     inferredType = silentNeverType;
+                // }
+                // else {
+                //     // Infer either the default or the empty object type when no inferences were
+                //     // made. It is important to remember that in this case, inference still
+                //     // succeeds, meaning there is no error for not having inference candidates. An
+                //     // inference error only occurs when there are *conflicting* candidates, i.e.
+                //     // candidates with no common supertype.
+                //     const defaultType = getDefaultFromTypeParameter(inference.typeParameter);
+                //     if (defaultType) {
+                //         // Instantiate the default type. Any forward reference to a type
+                //         // parameter should be instantiated to the empty object type.
+                //         inferredType = instantiateType(defaultType, mergeTypeMappers(createBackreferenceMapper(context, index), context.nonFixingMapper));
+                //     }
+                // }
             }
             else {
                 inferredType = getTypeFromInference(inference);
@@ -38177,11 +38186,11 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
     }
 
     function hasInferenceCandidates(info: InferenceInfo) {
-        return !!(info.candidates || info.contraCandidates);
+        return !!(info.candidates.size > 0 || info.contraCandidates.size > 0);
     }
 
     function hasInferenceCandidatesOrDefault(info: InferenceInfo) {
-        return !!(info.candidates || info.contraCandidates || hasTypeParameterDefault(info.typeParameter));
+        return !!(info.candidates.size > 0 || info.contraCandidates.size > 0 || hasTypeParameterDefault(info.typeParameter));
     }
 
     function hasOverlappingInferences(a: InferenceInfo[], b: InferenceInfo[]) {
