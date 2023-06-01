@@ -53,7 +53,6 @@ import {
     PropertyDeclaration,
     QualifiedName,
     ScriptTarget,
-    UnionOrIntersectionTypeNode,
     setParent,
     setTextRange,
     SignatureDeclaration,
@@ -66,6 +65,7 @@ import {
     TypePredicateNode,
     TypeReferenceNode,
     TypeReferenceSerializationKind,
+    UnionOrIntersectionTypeNode,
     VoidExpression,
 } from "../_namespaces/ts";
 

@@ -59,7 +59,6 @@ import {
     NodeFlags,
     ObjectFlags,
     PropertyAccessExpression,
-    UnionReduction,
     returnsPromise,
     ReturnStatement,
     returnTrue,
@@ -77,6 +76,7 @@ import {
     TypeChecker,
     TypeNode,
     TypeReference,
+    UnionReduction,
 } from "../_namespaces/ts";
 import {
     codeFixAll,

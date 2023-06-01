@@ -13,7 +13,6 @@ import {
     ObjectFlags,
     ObjectType,
     ResolvedType,
-    UnionOrIntersectionType,
     Signature,
     Symbol,
     SymbolWalker,
@@ -24,6 +23,7 @@ import {
     TypePredicate,
     TypeQueryNode,
     TypeReference,
+    UnionOrIntersectionType,
 } from "./_namespaces/ts";
 
 /** @internal */

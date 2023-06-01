@@ -5391,7 +5391,7 @@ export const enum NodeBuilderFlags {
     AllowThisInObjectLiteral                = 1 << 15,
     AllowQualifiedNameInPlaceOfIdentifier   = 1 << 16,
     AllowAnonymousIdentifier                = 1 << 17,
-    AllowEmptyUnionOrIntersection                  = 1 << 18,
+    AllowEmptyUnionOrIntersection           = 1 << 18,
     AllowEmptyTuple                         = 1 << 19,
     AllowUniqueESSymbolType                 = 1 << 20,
     AllowEmptyIndexInfoType                 = 1 << 21,
@@ -5886,7 +5886,7 @@ export interface SymbolLinks {
     mapper?: TypeMapper;                        // Type mapper for instantiation alias
     referenced?: boolean;                       // True if alias symbol has been referenced as a value that can be emitted
     constEnumReferenced?: boolean;              // True if alias symbol resolves to a const enum and is referenced as a value ('referenced' will be false)
-    containingType?: UnionOrIntersectionType;          // Containing union or intersection type for synthetic property
+    containingType?: UnionOrIntersectionType;   // Containing union or intersection type for synthetic property
     leftSpread?: Symbol;                        // Left source for synthetic spread property
     rightSpread?: Symbol;                       // Right source for synthetic spread property
     syntheticOrigin?: Symbol;                   // For a property on a mapped or spread type, points back to the original property
