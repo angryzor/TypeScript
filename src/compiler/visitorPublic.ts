@@ -817,11 +817,6 @@ const visitEachChildTable: VisitEachChildTable = {
             Debug.checkDefined(nodeVisitor(node.type, visitor, isTypeNode)));
     },
 
-    [SyntaxKind.ExistentialType]: function visitEachChildOfExistentialTypeNode(node, visitor, context, nodesVisitor, _nodeVisitor, _tokenVisitor) {
-        return context.factory.updateExistentialTypeNode(node,
-            nodesVisitor(node.types, visitor, isTypeNode));
-    },
-
     [SyntaxKind.UnionType]: function visitEachChildOfUnionTypeNode(node, visitor, context, nodesVisitor, _nodeVisitor, _tokenVisitor) {
         return context.factory.updateUnionTypeNode(node,
             nodesVisitor(node.types, visitor, isTypeNode));

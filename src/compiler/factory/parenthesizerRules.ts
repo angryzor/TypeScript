@@ -78,8 +78,6 @@ export function createParenthesizerRules(factory: NodeFactory): ParenthesizerRul
         parenthesizeConciseBodyOfArrowFunction,
         parenthesizeCheckTypeOfConditionalType,
         parenthesizeExtendsTypeOfConditionalType,
-        parenthesizeConstituentTypesOfExistentialType,
-        parenthesizeConstituentTypeOfExistentialType,
         parenthesizeConstituentTypesOfUnionType,
         parenthesizeConstituentTypeOfUnionType,
         parenthesizeConstituentTypesOfIntersectionType,
@@ -482,25 +480,6 @@ export function createParenthesizerRules(factory: NodeFactory): ParenthesizerRul
         return extendsType;
     }
 
-    // ExistentialType[Extends] :
-    //     `^`? IntersectionType[?Extends]
-    //     ExistentialType[?Extends] `^` IntersectionType[?Extends]
-    //
-    // - A union type constituent has the same precedence as the check type of a conditional type
-    function parenthesizeConstituentTypeOfExistentialType(type: TypeNode) {
-        switch (type.kind) {
-            case SyntaxKind.ExistentialType: // Not strictly necessary, but a union containing a union should have been flattened
-            case SyntaxKind.UnionType: // Not strictly necessary, but a union containing a union should have been flattened
-            case SyntaxKind.IntersectionType: // Not strictly necessary, but makes generated output more readable and avoids breaks in DT tests
-                return factory.createParenthesizedType(type);
-        }
-        return parenthesizeCheckTypeOfConditionalType(type);
-    }
-
-    function parenthesizeConstituentTypesOfExistentialType(members: readonly TypeNode[]): NodeArray<TypeNode> {
-        return factory.createNodeArray(sameMap(members, parenthesizeConstituentTypeOfExistentialType));
-    }
-
     // UnionType[Extends] :
     //     `|`? IntersectionType[?Extends]
     //     UnionType[?Extends] `|` IntersectionType[?Extends]
@@ -508,12 +487,11 @@ export function createParenthesizerRules(factory: NodeFactory): ParenthesizerRul
     // - A union type constituent has the same precedence as the check type of a conditional type
     function parenthesizeConstituentTypeOfUnionType(type: TypeNode) {
         switch (type.kind) {
-            case SyntaxKind.ExistentialType:
             case SyntaxKind.UnionType: // Not strictly necessary, but a union containing a union should have been flattened
             case SyntaxKind.IntersectionType: // Not strictly necessary, but makes generated output more readable and avoids breaks in DT tests
                 return factory.createParenthesizedType(type);
         }
-        return parenthesizeConstituentTypeOfExistentialType(type);
+        return parenthesizeCheckTypeOfConditionalType(type);
     }
 
     function parenthesizeConstituentTypesOfUnionType(members: readonly TypeNode[]): NodeArray<TypeNode> {
@@ -527,7 +505,6 @@ export function createParenthesizerRules(factory: NodeFactory): ParenthesizerRul
     // - An intersection type constituent does not allow function, constructor, conditional, or union types (they must be parenthesized)
     function parenthesizeConstituentTypeOfIntersectionType(type: TypeNode) {
         switch (type.kind) {
-            case SyntaxKind.ExistentialType:
             case SyntaxKind.UnionType:
             case SyntaxKind.IntersectionType: // Not strictly necessary, but an intersection containing an intersection should have been flattened
                 return factory.createParenthesizedType(type);
@@ -696,8 +673,6 @@ export const nullParenthesizerRules: ParenthesizerRules = {
     parenthesizeConciseBodyOfArrowFunction: identity,
     parenthesizeCheckTypeOfConditionalType: identity,
     parenthesizeExtendsTypeOfConditionalType: identity,
-    parenthesizeConstituentTypesOfExistentialType: nodes => cast(nodes, isNodeArray),
-    parenthesizeConstituentTypeOfExistentialType: identity,
     parenthesizeConstituentTypesOfUnionType: nodes => cast(nodes, isNodeArray),
     parenthesizeConstituentTypeOfUnionType: identity,
     parenthesizeConstituentTypesOfIntersectionType: nodes => cast(nodes, isNodeArray),

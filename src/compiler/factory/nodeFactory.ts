@@ -87,7 +87,6 @@ import {
     escapeLeadingUnderscores,
     every,
     ExclamationToken,
-    ExistentialTypeNode,
     ExportAssignment,
     ExportDeclaration,
     ExportSpecifier,
@@ -608,8 +607,6 @@ export function createNodeFactory(flags: NodeFactoryFlags, baseFactory: BaseNode
         updateOptionalTypeNode,
         createRestTypeNode,
         updateRestTypeNode,
-        createExistentialTypeNode,
-        updateExistentialTypeNode,
         createUnionTypeNode,
         updateUnionTypeNode,
         createIntersectionTypeNode,
@@ -2401,8 +2398,8 @@ export function createNodeFactory(flags: NodeFactoryFlags, baseFactory: BaseNode
             : node;
     }
 
-    function createUnionOrIntersectionTypeNode(kind: SyntaxKind.UnionType | SyntaxKind.ExistentialType | SyntaxKind.IntersectionType, types: readonly TypeNode[], parenthesize: (nodes: readonly TypeNode[]) => readonly TypeNode[]) {
-        const node = createBaseNode<UnionTypeNode | ExistentialTypeNode | IntersectionTypeNode>(kind);
+    function createUnionOrIntersectionTypeNode(kind: SyntaxKind.UnionType | SyntaxKind.IntersectionType, types: readonly TypeNode[], parenthesize: (nodes: readonly TypeNode[]) => readonly TypeNode[]) {
+        const node = createBaseNode<UnionTypeNode | IntersectionTypeNode>(kind);
         node.types = factory.createNodeArray(parenthesize(types));
         node.transformFlags = TransformFlags.ContainsTypeScript;
         return node;
@@ -2412,16 +2409,6 @@ export function createNodeFactory(flags: NodeFactoryFlags, baseFactory: BaseNode
         return node.types !== types
             ? update(createUnionOrIntersectionTypeNode(node.kind, types, parenthesize) as T, node)
             : node;
-    }
-
-    // @api
-    function createExistentialTypeNode(types: readonly TypeNode[]): ExistentialTypeNode {
-        return createUnionOrIntersectionTypeNode(SyntaxKind.ExistentialType, types, parenthesizerRules().parenthesizeConstituentTypesOfExistentialType) as ExistentialTypeNode;
-    }
-
-    // @api
-    function updateExistentialTypeNode(node: ExistentialTypeNode, types: NodeArray<TypeNode>) {
-        return updateUnionOrIntersectionTypeNode(node, types, parenthesizerRules().parenthesizeConstituentTypesOfExistentialType);
     }
 
     // @api

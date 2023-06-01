@@ -166,8 +166,6 @@ import {
     every,
     EvolvingArrayType,
     ExclamationToken,
-    ExistentialType,
-    ExistentialTypeNode,
     ExportAssignment,
     exportAssignmentIsAlias,
     ExportDeclaration,
@@ -6569,9 +6567,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 }
                 const typeNodes = mapToTypeNodes(types, context, /*isBareList*/ true);
                 if (typeNodes && typeNodes.length > 0) {
-                    return type.flags & TypeFlags.Existential ? factory.createExistentialTypeNode(typeNodes) :
-                        type.flags & TypeFlags.Union ? factory.createUnionTypeNode(typeNodes) :
-                        factory.createIntersectionTypeNode(typeNodes);
+                    return type.flags & TypeFlags.Union ? factory.createUnionTypeNode(typeNodes) : factory.createIntersectionTypeNode(typeNodes);
                 }
                 else {
                     if (!context.encounteredError && !(context.flags & NodeBuilderFlags.AllowEmptyUnionOrIntersection)) {
@@ -6585,10 +6581,10 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                     context.approximateLength += 6;
                     return symbolToTypeNode(type.symbol, context, SymbolFlags.Value);
                 }
-                return factory.createTypeOperatorNode(SyntaxKind.OneOfKeyword, typeToTypeNodeHelper((type as OneOfType).type, context));
+                return factory.createTypeOperatorNode(SyntaxKind.OneOfKeyword, typeToTypeNodeHelper((type as OneOfType).origin, context));
             }
             if (type.flags & TypeFlags.AllOf) {
-                return factory.createTypeOperatorNode(SyntaxKind.AllOfKeyword, typeToTypeNodeHelper((type as AllOfType).type, context));
+                return factory.createTypeOperatorNode(SyntaxKind.AllOfKeyword, typeToTypeNodeHelper((type as AllOfType).origin, context));
             }
             if (objectFlags & (ObjectFlags.Anonymous | ObjectFlags.Mapped)) {
                 Debug.assert(!!(type.flags & TypeFlags.Object));
@@ -13100,7 +13096,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
     }
 
     function resolveOneOfTypeMembers(type: OneOfType) {
-        const child = getReducedApparentType(type.type);
+        const child = getReducedApparentType(type.origin);
         if (child.flags & TypeFlags.StructuredType) {
             const resolvedUnion = resolveStructuredTypeMembers(child as StructuredType);
             const callSignatures = resolvedUnion.callSignatures;
@@ -13114,7 +13110,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
     }
 
     function resolveAllOfTypeMembers(type: AllOfType) {
-        const child = type.type;
+        const child = type.origin;
         const callSignatures = getSignaturesOfType(child, SignatureKind.Call);
         const constructSignatures = getSignaturesOfType(child, SignatureKind.Construct);
         const indexInfos = getIndexInfosOfType(child);
@@ -13590,12 +13586,12 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
 
     function getPropertiesOfOneOfType(type: OneOfType): Symbol[] {
         // if (!type.resolvedProperties) {
-        //     const unionProps = getPropertiesOfUnionOrIntersectionType(type.type);
+        //     const unionProps = getPropertiesOfUnionOrIntersectionType(type.origin);
 
         //     type.resolvedProperties = unionProps.map(prop => createSymbolWithType(prop, getDeferredPropAccess(type, prop)));
         // }
         // return type.resolvedProperties;
-        return getPropertiesOfType(type.type);
+        return getPropertiesOfType(type.origin);
     }
 
     function getPropertiesOfType(type: Type): Symbol[] {
@@ -13885,8 +13881,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 if (!different) {
                     return t;
                 }
-                return t.flags & TypeFlags.Existential && baseTypes.length === types.length ? getExistentialType(baseTypes) :
-                    t.flags & TypeFlags.Union && baseTypes.length === types.length ? getUnionType(baseTypes) :
+                return t.flags & TypeFlags.Union && baseTypes.length === types.length ? getUnionType(baseTypes) :
                     t.flags & TypeFlags.Intersection && baseTypes.length ? getIntersectionType(baseTypes) :
                     undefined;
             }
@@ -14249,7 +14244,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         // let property = type.propertyCache?.get(name);
 
         // if (!property) {
-        //     const unionProperty = getPropertyOfUnionOrIntersectionType(type.type, name, skipObjectFunctionPropertyAugment);
+        //     const unionProperty = getPropertyOfUnionOrIntersectionType(type.origin, name, skipObjectFunctionPropertyAugment);
 
         //     if(unionProperty) {
         //         property = createSymbolWithType(unionProperty, getDeferredIndexedAccessType(type, createLiteralType(TypeFlags.StringLiteral, symbolName(unionProperty))));
@@ -14259,7 +14254,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         // }
 
         // return property;
-        return getPropertyOfType(type.type, name, skipObjectFunctionPropertyAugment);
+        return getPropertyOfType(type.origin, name, skipObjectFunctionPropertyAugment);
     }
 
     /**
@@ -16679,16 +16674,6 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         return type;
     }
 
-    function getTypeFromExistentialTypeNode(node: ExistentialTypeNode): Type {
-        const links = getNodeLinks(node);
-        if (!links.resolvedType) {
-            const aliasSymbol = getAliasSymbolForTypeNode(node);
-            links.resolvedType = getExistentialType(map(node.types, getTypeFromTypeNode), UnionReduction.Literal,
-                aliasSymbol, getTypeArgumentsForAliasSymbol(aliasSymbol));
-        }
-        return links.resolvedType;
-    }
-
     function getTypeFromUnionTypeNode(node: UnionTypeNode): Type {
         const links = getNodeLinks(node);
         if (!links.resolvedType) {
@@ -17025,25 +17010,25 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         return links.resolvedType;
     }
 
-    function createAllOfType(type: Type) {
+    function createAllOfType(origin: Type) {
         const result = createType(TypeFlags.AllOf) as AllOfType;
-        result.type = type;
+        result.origin = origin;
         return result;
     }
 
-    function getAllOfType(type: Type) {
-        return createAllOfType(type);
+    function getAllOfType(origin: Type) {
+        return createAllOfType(origin);
     }
 
-    function createOneOfType(type: UnionType | InstantiableType, symbol?: Symbol) {
+    function createOneOfType(origin: UnionType | InstantiableType, symbol?: Symbol) {
         const result = createTypeWithSymbol(TypeFlags.OneOf, symbol!) as OneOfType;
-        result.type = type;
+        result.origin = origin;
         return result;
     }
 
-    function getOneOfType(type: Type, symbol?: Symbol) {
+    function getOneOfType(origin: Type, symbol?: Symbol) {
         // Squash nested oneofs. `mapType` will join the unions.
-        const mapped = mapType(type, type => type.flags & TypeFlags.OneOf ? (type as OneOfType).type : type);
+        const mapped = mapType(origin, type => type.flags & TypeFlags.OneOf ? (type as OneOfType).origin : type);
 
         // Don't pack unary types. Their type is definite.
         return mapped.flags & (TypeFlags.Union | TypeFlags.InstantiableNonPrimitive) ? createOneOfType(mapped as UnionType | InstantiableType, symbol) : mapped;
@@ -18670,8 +18655,6 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 return getTypeFromArrayOrTupleTypeNode(node as ArrayTypeNode | TupleTypeNode);
             case SyntaxKind.OptionalType:
                 return getTypeFromOptionalTypeNode(node as OptionalTypeNode);
-            case SyntaxKind.ExistentialType:
-                return getTypeFromExistentialTypeNode(node as ExistentialTypeNode);
             case SyntaxKind.UnionType:
                 return getTypeFromUnionTypeNode(node as UnionTypeNode);
             case SyntaxKind.IntersectionType:
@@ -19246,10 +19229,10 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 getUnionType(newTypes, UnionReduction.Literal, newAliasSymbol, newAliasTypeArguments);
         }
         if (flags & TypeFlags.OneOf) {
-            return getOneOfType(instantiateType((type as OneOfType).type, mapper));
+            return getOneOfType(instantiateType((type as OneOfType).origin, mapper));
         }
         if (flags & TypeFlags.AllOf) {
-            return getAllOfType(instantiateType((type as AllOfType).type, mapper));
+            return getAllOfType(instantiateType((type as AllOfType).origin, mapper));
         }
         if (flags & TypeFlags.Index) {
             return getIndexType(instantiateType((type as IndexType).type, mapper));
@@ -20500,7 +20483,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
     }
 
     function generateOneOfTypeMappers(oneOfs: OneOfType[]) {
-        const instantiations = cartesianProduct(oneOfs.map(oneOf => oneOf.type.flags & TypeFlags.Union ? (oneOf.type as UnionType).types : [oneOf.type]));
+        const instantiations = cartesianProduct(oneOfs.map(oneOf => oneOf.origin.flags & TypeFlags.Union ? (oneOf.origin as UnionType).types : [oneOf.origin]));
 
         return instantiations.map(instantiation => makeArrayTypeMapper(oneOfs, instantiation));
     }
@@ -20585,7 +20568,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         }
 
         discoverOneOf(iterationContext.environment, oneOf);
-        return oneOf.type.flags & TypeFlags.Union ? (oneOf.type as UnionType).types[(oneOf.type as UnionType).types.length - 1] : oneOf.type;
+        return oneOf.origin.flags & TypeFlags.Union ? (oneOf.origin as UnionType).types[(oneOf.origin as UnionType).types.length - 1] : oneOf.origin;
     }
 
     function mapOneOfInstantiationsAndFilterConflicts<T>(context: OneOfContext, allOfType: AllOfType = freeAllOfType, f: (mapper: OneOfInstantiationMap) => T, rollback?: () => void): Iterable<T> {
@@ -21783,10 +21766,10 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 return result;
             }
             if (source.flags & TypeFlags.AllOf) {
-                return eachOneOfInstantiationRelatedToType((source as AllOfType).type, target, reportErrors, intersectionState, (source as AllOfType));
+                return eachOneOfInstantiationRelatedToType((source as AllOfType).origin, target, reportErrors, intersectionState, (source as AllOfType));
             }
             if (target.flags & TypeFlags.AllOf) {
-                return typeRelatedToSomeOneOfInstantiation(source, (target as AllOfType).type, reportErrors, intersectionState, (target as AllOfType));
+                return typeRelatedToSomeOneOfInstantiation(source, (target as AllOfType).origin, reportErrors, intersectionState, (target as AllOfType));
             }
             if (source.flags & TypeFlags.OneOf) {
                 return isRelatedTo(getOneOfSubstitution(sourceOneOfIterationContext, source as OneOfType), target, RecursionFlags.None, reportErrors, /*headMessage*/ undefined, intersectionState);
@@ -24536,7 +24519,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 objectFlags & ObjectFlags.Anonymous && type.symbol && type.symbol.flags & (SymbolFlags.Function | SymbolFlags.Method | SymbolFlags.Class | SymbolFlags.TypeLiteral | SymbolFlags.ObjectLiteral) && type.symbol.declarations ||
                 objectFlags & (ObjectFlags.Mapped | ObjectFlags.ReverseMapped | ObjectFlags.ObjectRestType | ObjectFlags.InstantiationExpressionType)) ||
             type.flags & (TypeFlags.UnionOrIntersection | TypeFlags.TemplateLiteral) && !(type.flags & TypeFlags.EnumLiteral) && !isNonGenericTopLevelType(type) && some((type as UnionOrIntersectionType | TemplateLiteralType).types, couldContainTypeVariables) ||
-            type.flags & (TypeFlags.UnionOperator) && couldContainTypeVariables((type as UnionOperatorType).type));
+            type.flags & (TypeFlags.OneOf | TypeFlags.AllOf) && couldContainTypeVariables((type as OneOfType | AllOfType).origin));
         if (type.flags & TypeFlags.ObjectFlagsType) {
             (type as ObjectFlagsType).objectFlags |= ObjectFlags.CouldContainTypeVariablesComputed | (result ? ObjectFlags.CouldContainTypeVariables : 0);
         }
@@ -24702,17 +24685,15 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
     }
 
     function getTypeFromInference(inference: InferenceInfo) {
-        return wildcardType;
-        // if (inference.candidates) {
-        //     const candidateUnions = [...inference.candidates.values()].map(t => inference.isOneOfArgument ? getCommonSupertype(t) : getOneOfType(getUnionType(t, UnionReduction.Subtype)));
-        //     return inference.isAllOfArgument ? getCommonSupertype(candidateUnions) : getUnionType(candidateUnions, UnionReduction.Subtype);
-        // }
-        // if (inference.contraCandidates) {
-        //     const candidateIntersections = [...inference.contraCandidates.values()].map(t => inference.isOneOfArgument ? getCommonSubtype(t) : getIntersectionType(t));
-        //     return inference.isAllOfArgument ? getCommonSubtype(candidateIntersections) : getIntersectionType(candidateIntersections);
-        // }
-        // return undefined;
-    }
+        if (inference.candidates) {
+            const candidateUnions = [...inference.candidates.values()].map(t => inference.isOneOfArgument ? getCommonSupertype(t) : getOneOfType(getUnionType(t, UnionReduction.Subtype)));
+            return inference.isAllOfArgument ? getCommonSupertype(candidateUnions) : getUnionType(candidateUnions, UnionReduction.Subtype);
+        }
+        if (inference.contraCandidates) {
+            const candidateIntersections = [...inference.contraCandidates.values()].map(t => inference.isOneOfArgument ? getCommonSubtype(t) : getIntersectionType(t));
+            return inference.isAllOfArgument ? getCommonSubtype(candidateIntersections) : getIntersectionType(candidateIntersections);
+        }
+        return undefined
 
     function hasSkipDirectInferenceFlag(node: Node) {
         return !!getNodeLinks(node).skipDirectInference;
@@ -25095,12 +25076,15 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 inferFromTypes((source as SubstitutionType).baseType, target);
                 inferWithPriority(getSubstitutionIntersection(source as SubstitutionType), target, InferencePriority.SubstituteSource); // Make substitute inference at a lower priority
             }
+            // else if (source.flags & TypeFlags.OneOf && target.flags & TypeFlags.OneOf) {
+            //     inferFromTypes((source as OneOfType).origin, (target as OneOfType).origin);
+            // }
             else if (source.flags & TypeFlags.OneOf) {
                 Debug.assertIsDefined(sourceOneOfIterationContext, "oneof encountered outside oneof iteration during inferencing");
                 inferFromTypes(getOneOfSubstitution(sourceOneOfIterationContext, source as OneOfType), target);
             }
             else if (target.flags & TypeFlags.OneOf) {
-                inferFromTypes(getAllOfType(source.flags & TypeFlags.Union ? getCommonSupertype((source as UnionType).types) : source), (target as OneOfType).type);
+                inferFromTypes(getAllOfType(source.flags & TypeFlags.Union ? getCommonSupertype((source as UnionType).types) : source), (target as OneOfType).origin);
             }
             else if (target.flags & TypeFlags.Conditional) {
                 invokeOnce(source, (target as ConditionalType), inferToConditionalType);
@@ -25116,11 +25100,11 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 }
             }
             else if (source.flags & TypeFlags.AllOf) {
-                inferFromOneOfInstantiations((source as AllOfType).type, target, source as AllOfType);
+                inferFromOneOfInstantiations((source as AllOfType).origin, target, source as AllOfType);
                 return;
             }
             else if (target.flags & TypeFlags.AllOf) {
-                inferToMultipleTypes(source, [(target as AllOfType).type], target as AllOfType);
+                inferToMultipleTypes(source, [(target as AllOfType).origin], target as AllOfType);
                 return;
             }
             else if (target.flags & TypeFlags.TemplateLiteral) {
@@ -40535,7 +40519,6 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             switch (node.kind) {
                 case SyntaxKind.IntersectionType:
                 case SyntaxKind.UnionType:
-                case SyntaxKind.ExistentialType:
                     return getEntityNameForDecoratorMetadataFromTypeList((node as UnionOrIntersectionTypeNode).types);
 
                 case SyntaxKind.ConditionalType:
@@ -45303,7 +45286,6 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 return checkArrayType(node as ArrayTypeNode);
             case SyntaxKind.TupleType:
                 return checkTupleType(node as TupleTypeNode);
-            case SyntaxKind.ExistentialType:
             case SyntaxKind.UnionType:
             case SyntaxKind.IntersectionType:
                 return checkUnionOrIntersectionType(node as UnionOrIntersectionTypeNode);

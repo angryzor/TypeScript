@@ -1609,14 +1609,6 @@
         "category": "Error",
         "code": 1490
     },
-    "Function type notation must be parenthesized when used in an existential type.": {
-        "category": "Error",
-        "code": 1491
-    },
-    "Constructor type notation must be parenthesized when used in an existential type.": {
-        "category": "Error",
-        "code": 1492
-    },
 
     "The types of '{0}' are incompatible between these types.": {
         "category": "Error",

@@ -331,9 +331,6 @@ export function createRuntimeTypeSerializer(context: TransformationContext): Run
             case SyntaxKind.UnionType:
                 return serializeUnionOrIntersectionConstituents((node as UnionOrIntersectionTypeNode).types, /*isIntersection*/ false);
 
-            case SyntaxKind.ExistentialType:
-                return serializeUnionOrIntersectionConstituents((node as UnionOrIntersectionTypeNode).types, /*isIntersection*/ false);
-
             case SyntaxKind.ConditionalType:
                 return serializeUnionOrIntersectionConstituents([(node as ConditionalTypeNode).trueType, (node as ConditionalTypeNode).falseType], /*isIntersection*/ false);
 
