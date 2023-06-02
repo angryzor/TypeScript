@@ -87,6 +87,8 @@ import {
     escapeLeadingUnderscores,
     every,
     ExclamationToken,
+    ExistentiallyQuantifiedIntersectionTypeNode,
+    ExistentiallyQuantifiedUnionTypeNode,
     ExportAssignment,
     ExportDeclaration,
     ExportSpecifier,
@@ -607,6 +609,10 @@ export function createNodeFactory(flags: NodeFactoryFlags, baseFactory: BaseNode
         updateOptionalTypeNode,
         createRestTypeNode,
         updateRestTypeNode,
+        createExistentiallyQuantifiedUnionTypeNode,
+        updateExistentiallyQuantifiedUnionTypeNode,
+        createExistentiallyQuantifiedIntersectionTypeNode,
+        updateExistentiallyQuantifiedIntersectionTypeNode,
         createUnionTypeNode,
         updateUnionTypeNode,
         createIntersectionTypeNode,
@@ -2398,8 +2404,8 @@ export function createNodeFactory(flags: NodeFactoryFlags, baseFactory: BaseNode
             : node;
     }
 
-    function createUnionOrIntersectionTypeNode(kind: SyntaxKind.UnionType | SyntaxKind.IntersectionType, types: readonly TypeNode[], parenthesize: (nodes: readonly TypeNode[]) => readonly TypeNode[]) {
-        const node = createBaseNode<UnionTypeNode | IntersectionTypeNode>(kind);
+    function createUnionOrIntersectionTypeNode(kind: SyntaxKind.ExistentiallyQuantifiedUnionType | SyntaxKind.ExistentiallyQuantifiedIntersectionType | SyntaxKind.UnionType | SyntaxKind.IntersectionType, types: readonly TypeNode[], parenthesize: (nodes: readonly TypeNode[]) => readonly TypeNode[]) {
+        const node = createBaseNode<ExistentiallyQuantifiedUnionTypeNode | ExistentiallyQuantifiedIntersectionTypeNode | UnionTypeNode | IntersectionTypeNode>(kind);
         node.types = factory.createNodeArray(parenthesize(types));
         node.transformFlags = TransformFlags.ContainsTypeScript;
         return node;
@@ -2409,6 +2415,26 @@ export function createNodeFactory(flags: NodeFactoryFlags, baseFactory: BaseNode
         return node.types !== types
             ? update(createUnionOrIntersectionTypeNode(node.kind, types, parenthesize) as T, node)
             : node;
+    }
+
+    // @api
+    function createExistentiallyQuantifiedUnionTypeNode(types: readonly TypeNode[]): ExistentiallyQuantifiedUnionTypeNode {
+        return createUnionOrIntersectionTypeNode(SyntaxKind.ExistentiallyQuantifiedUnionType, types, parenthesizerRules().parenthesizeConstituentTypesOfExistentiallyQuantifiedUnionType) as ExistentiallyQuantifiedUnionTypeNode;
+    }
+
+    // @api
+    function updateExistentiallyQuantifiedUnionTypeNode(node: ExistentiallyQuantifiedUnionTypeNode, types: NodeArray<TypeNode>) {
+        return updateUnionOrIntersectionTypeNode(node, types, parenthesizerRules().parenthesizeConstituentTypesOfExistentiallyQuantifiedUnionType);
+    }
+
+    // @api
+    function createExistentiallyQuantifiedIntersectionTypeNode(types: readonly TypeNode[]): ExistentiallyQuantifiedIntersectionTypeNode {
+        return createUnionOrIntersectionTypeNode(SyntaxKind.ExistentiallyQuantifiedIntersectionType, types, parenthesizerRules().parenthesizeConstituentTypesOfExistentiallyQuantifiedIntersectionType) as ExistentiallyQuantifiedIntersectionTypeNode;
+    }
+
+    // @api
+    function updateExistentiallyQuantifiedIntersectionTypeNode(node: ExistentiallyQuantifiedIntersectionTypeNode, types: NodeArray<TypeNode>) {
+        return updateUnionOrIntersectionTypeNode(node, types, parenthesizerRules().parenthesizeConstituentTypesOfExistentiallyQuantifiedIntersectionType);
     }
 
     // @api

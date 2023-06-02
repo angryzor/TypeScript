@@ -29,6 +29,8 @@ import {
     isConstructorTypeNode,
     isConstructSignatureDeclaration,
     isDefaultClause,
+    isExistentiallyQuantifiedIntersectionTypeNode,
+    isExistentiallyQuantifiedUnionTypeNode,
     isFunctionTypeNode,
     isGeneratedIdentifier,
     isGetAccessorDeclaration,
@@ -696,6 +698,8 @@ export namespace Debug {
                                 isTupleTypeNode(this) ? "TupleTypeNode" :
                                 isOptionalTypeNode(this) ? "OptionalTypeNode" :
                                 isRestTypeNode(this) ? "RestTypeNode" :
+                                isExistentiallyQuantifiedUnionTypeNode(this) ? "ExistentiallyQuantifiedUnionTypeNode" :
+                                isExistentiallyQuantifiedIntersectionTypeNode(this) ? "ExistentiallyQuantifiedIntersectionTypeNode" :
                                 isUnionTypeNode(this) ? "UnionTypeNode" :
                                 isIntersectionTypeNode(this) ? "IntersectionTypeNode" :
                                 isConditionalTypeNode(this) ? "ConditionalTypeNode" :

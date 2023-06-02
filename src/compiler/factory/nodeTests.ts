@@ -50,6 +50,8 @@ import {
     EnumMember,
     EqualsGreaterThanToken,
     ExclamationToken,
+    ExistentiallyQuantifiedIntersectionTypeNode,
+    ExistentiallyQuantifiedUnionTypeNode,
     ExportAssignment,
     ExportDeclaration,
     ExportKeyword,
@@ -501,6 +503,14 @@ export function isOptionalTypeNode(node: Node): node is OptionalTypeNode {
 
 export function isRestTypeNode(node: Node): node is RestTypeNode {
     return node.kind === SyntaxKind.RestType;
+}
+
+export function isExistentiallyQuantifiedUnionTypeNode(node: Node): node is ExistentiallyQuantifiedUnionTypeNode {
+    return node.kind === SyntaxKind.ExistentiallyQuantifiedUnionType;
+}
+
+export function isExistentiallyQuantifiedIntersectionTypeNode(node: Node): node is ExistentiallyQuantifiedIntersectionTypeNode {
+    return node.kind === SyntaxKind.ExistentiallyQuantifiedIntersectionType;
 }
 
 export function isUnionTypeNode(node: Node): node is UnionTypeNode {

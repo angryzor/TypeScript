@@ -166,6 +166,8 @@ import {
     every,
     EvolvingArrayType,
     ExclamationToken,
+    ExistentiallyQuantifiedIntersectionTypeNode,
+    ExistentiallyQuantifiedUnionTypeNode,
     ExportAssignment,
     exportAssignmentIsAlias,
     ExportDeclaration,
@@ -912,6 +914,7 @@ import {
     PunctuationSyntaxKind,
     pushIfUnique,
     QualifiedName,
+    Quantification,
     QuestionToken,
     rangeEquals,
     rangeOfNode,
@@ -6567,7 +6570,12 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 }
                 const typeNodes = mapToTypeNodes(types, context, /*isBareList*/ true);
                 if (typeNodes && typeNodes.length > 0) {
-                    return type.flags & TypeFlags.Union ? factory.createUnionTypeNode(typeNodes) : factory.createIntersectionTypeNode(typeNodes);
+                    if ((type as UnionOrIntersectionType).quantification === Quantification.Universal) {
+                        return type.flags & TypeFlags.Union ? factory.createUnionTypeNode(typeNodes) : factory.createIntersectionTypeNode(typeNodes);
+                    }
+                    else {
+                        return type.flags & TypeFlags.Union ? factory.createExistentiallyQuantifiedUnionTypeNode(typeNodes) : factory.createExistentiallyQuantifiedIntersectionTypeNode(typeNodes);
+                    }
                 }
                 else {
                     if (!context.encounteredError && !(context.flags & NodeBuilderFlags.AllowEmptyUnionOrIntersection)) {
@@ -12134,7 +12142,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 }
             }
             const enumType = memberTypeList.length ?
-                getUnionType(memberTypeList, UnionReduction.Literal, symbol, /*aliasTypeArguments*/ undefined) :
+                getUnionType(memberTypeList, UnionReduction.Literal, Quantification.Universal, symbol, /*aliasTypeArguments*/ undefined) :
                 createComputedEnumType(symbol);
             if (enumType.flags & TypeFlags.Union) {
                 enumType.flags |= TypeFlags.EnumLiteral;
@@ -16218,7 +16226,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             // Transform [A, ...(X | Y | Z)] into [A, ...X] | [A, ...Y] | [A, ...Z]
             const unionIndex = findIndex(elementTypes, (t, i) => !!(target.elementFlags[i] & ElementFlags.Variadic && t.flags & (TypeFlags.Never | TypeFlags.Union)));
             if (unionIndex >= 0) {
-                return checkCrossProductUnion(map(elementTypes, (t, i) => target.elementFlags[i] & ElementFlags.Variadic ? t : unknownType)) ?
+                return checkCrossProductUnion(map(elementTypes, (t, i) => target.elementFlags[i] & ElementFlags.Variadic ? t : unknownType), Quantification.Universal) ?
                     mapType(elementTypes[unionIndex], t => createNormalizedTupleType(target, replaceElement(elementTypes, unionIndex, t))) :
                     errorType;
             }
@@ -16369,15 +16377,15 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
 
     // Add the given types to the given type set. Order is preserved, duplicates are removed,
     // and nested types of the given kind are flattened into the set.
-    function addTypesToUnion(typeSet: Type[], includes: TypeFlags, types: readonly Type[]): TypeFlags {
+    function addTypesToUnion(typeSet: Type[], includes: TypeFlags, types: readonly Type[], quantification: Quantification): TypeFlags {
         let lastType: Type | undefined;
         for (const type of types) {
             // We skip the type if it is the same as the last type we processed. This simple test particularly
             // saves a lot of work for large lists of the same union type, such as when resolving `Record<A, B>[A]`,
             // where A and B are large union types.
             if (type !== lastType) {
-                includes = type.flags & TypeFlags.Union ?
-                    addTypesToUnion(typeSet, includes | (isNamedUnionType(type) ? TypeFlags.Union : 0), (type as UnionType).types) :
+                includes = type.flags & TypeFlags.Union && (type as UnionType).quantification === quantification ?
+                    addTypesToUnion(typeSet, includes | (isNamedUnionType(type) ? TypeFlags.Union : 0), (type as UnionType).types, quantification) :
                     addTypeToUnion(typeSet, includes, type);
                 lastType = type;
             }
@@ -16498,23 +16506,24 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         return !!(type.flags & TypeFlags.Union && (type.aliasSymbol || (type as UnionType).origin));
     }
 
-    function addNamedUnions(namedUnions: Type[], types: readonly Type[]) {
+    function addNamedUnions(namedUnions: Type[], types: readonly Type[], quantification: Quantification) {
         for (const t of types) {
-            if (t.flags & TypeFlags.Union) {
+            if (t.flags & TypeFlags.Union && (t as UnionType).quantification === quantification) {
                 const origin = (t as UnionType).origin;
                 if (t.aliasSymbol || origin && !(origin.flags & TypeFlags.Union)) {
                     pushIfUnique(namedUnions, t);
                 }
                 else if (origin && origin.flags & TypeFlags.Union) {
-                    addNamedUnions(namedUnions, (origin as UnionType).types);
+                    addNamedUnions(namedUnions, (origin as UnionType).types, quantification);
                 }
             }
         }
     }
 
-    function createOriginUnionOrIntersectionType(flags: TypeFlags, types: Type[]) {
+    function createOriginUnionOrIntersectionType(flags: TypeFlags, types: Type[], quantification: Quantification) {
         const result = createOriginType(flags) as UnionOrIntersectionType;
         result.types = types;
+        result.quantification = quantification;
         return result;
     }
 
@@ -16525,7 +16534,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
     // expression constructs such as array literals and the || and ?: operators). Named types can
     // circularly reference themselves and therefore cannot be subtype reduced during their declaration.
     // For example, "type Item = string | (() => Item" is a named type that circularly references itself.
-    function getUnionType(types: readonly Type[], unionReduction: UnionReduction = UnionReduction.Literal, aliasSymbol?: Symbol, aliasTypeArguments?: readonly Type[], origin?: Type): Type {
+    function getUnionType(types: readonly Type[], unionReduction: UnionReduction = UnionReduction.Literal, quantification: Quantification = Quantification.Universal, aliasSymbol?: Symbol, aliasTypeArguments?: readonly Type[], origin?: Type): Type {
         if (types.length === 0) {
             return neverType;
         }
@@ -16534,22 +16543,23 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         }
         // We optimize for the common case of unioning a union type with some other type (such as `undefined`).
         if (types.length === 2 && !origin && (types[0].flags & TypeFlags.Union || types[1].flags & TypeFlags.Union)) {
+            const quantificationInfix = quantification === Quantification.Universal ? "∀" : "∃";
             const infix = unionReduction === UnionReduction.None ? "N" : unionReduction === UnionReduction.Subtype ? "S" : "L";
             const index = types[0].id < types[1].id ? 0 : 1;
-            const id = types[index].id + infix + types[1 - index].id + getAliasId(aliasSymbol, aliasTypeArguments);
+            const id = quantificationInfix + types[index].id + infix + types[1 - index].id + getAliasId(aliasSymbol, aliasTypeArguments);
             let type = unionOfUnionTypes.get(id);
             if (!type) {
-                type = getUnionTypeWorker(types, unionReduction, aliasSymbol, aliasTypeArguments, /*origin*/ undefined);
+                type = getUnionTypeWorker(types, unionReduction, quantification, aliasSymbol, aliasTypeArguments, /*origin*/ undefined);
                 unionOfUnionTypes.set(id, type);
             }
             return type;
         }
-        return getUnionTypeWorker(types, unionReduction, aliasSymbol, aliasTypeArguments, origin);
+        return getUnionTypeWorker(types, unionReduction, quantification, aliasSymbol, aliasTypeArguments, origin);
     }
 
-    function getUnionTypeWorker(types: readonly Type[], unionReduction: UnionReduction, aliasSymbol: Symbol | undefined, aliasTypeArguments: readonly Type[] | undefined, origin: Type | undefined): Type {
+    function getUnionTypeWorker(types: readonly Type[], unionReduction: UnionReduction, quantification: Quantification, aliasSymbol: Symbol | undefined, aliasTypeArguments: readonly Type[] | undefined, origin: Type | undefined): Type {
         let typeSet: Type[] | undefined = [];
-        const includes = addTypesToUnion(typeSet, 0 as TypeFlags, types);
+        const includes = addTypesToUnion(typeSet, 0 as TypeFlags, types, quantification);
         if (unionReduction !== UnionReduction.None) {
             if (includes & TypeFlags.AnyOrUnknown) {
                 return includes & TypeFlags.Any ?
@@ -16582,7 +16592,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         }
         if (!origin && includes & TypeFlags.Union) {
             const namedUnions: Type[] = [];
-            addNamedUnions(namedUnions, types);
+            addNamedUnions(namedUnions, types, quantification);
             const reducedTypes: Type[] = [];
             for (const t of typeSet) {
                 if (!some(namedUnions, union => containsType((union as UnionType).types, t))) {
@@ -16599,12 +16609,12 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 for (const t of namedUnions) {
                     insertType(reducedTypes, t);
                 }
-                origin = createOriginUnionOrIntersectionType(TypeFlags.Union, reducedTypes);
+                origin = createOriginUnionOrIntersectionType(TypeFlags.Union, reducedTypes, quantification);
             }
         }
         const objectFlags = (includes & TypeFlags.NotPrimitiveUnion ? 0 : ObjectFlags.PrimitiveUnion) |
             (includes & TypeFlags.Intersection ? ObjectFlags.ContainsIntersections : 0);
-        return getUnionTypeFromSortedList(typeSet, objectFlags, aliasSymbol, aliasTypeArguments, origin);
+        return getUnionTypeFromSortedList(typeSet, quantification, objectFlags, aliasSymbol, aliasTypeArguments, origin);
     }
 
     function getUnionOrIntersectionTypePredicate(signatures: readonly Signature[], kind: TypeFlags | undefined): TypePredicate | undefined {
@@ -16645,7 +16655,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
     }
 
     // This function assumes the constituent type list is sorted and deduplicated.
-    function getUnionTypeFromSortedList(types: Type[], precomputedObjectFlags: ObjectFlags, aliasSymbol?: Symbol, aliasTypeArguments?: readonly Type[], origin?: Type): Type {
+    function getUnionTypeFromSortedList(types: Type[], quantification: Quantification, precomputedObjectFlags: ObjectFlags, aliasSymbol?: Symbol, aliasTypeArguments?: readonly Type[], origin?: Type): Type {
         if (types.length === 0) {
             return neverType;
         }
@@ -16656,12 +16666,14 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             origin.flags & TypeFlags.Union ? `|${getTypeListId((origin as UnionType).types)}` :
             origin.flags & TypeFlags.Intersection ? `&${getTypeListId((origin as IntersectionType).types)}` :
             `#${(origin as IndexType).type.id}|${getTypeListId(types)}`; // origin type id alone is insufficient, as `keyof x` may resolve to multiple WIP values while `x` is still resolving
-        const id = typeKey + getAliasId(aliasSymbol, aliasTypeArguments);
+        const quantificationKey = quantification === Quantification.Universal ? "∀" : "∃";
+        const id = quantificationKey + typeKey + getAliasId(aliasSymbol, aliasTypeArguments);
         let type = unionTypes.get(id);
         if (!type) {
             type = createType(TypeFlags.Union) as UnionType;
             type.objectFlags = precomputedObjectFlags | getPropagatingFlagsOfTypes(types, /*excludeKinds*/ TypeFlags.Nullable);
             type.types = types;
+            type.quantification = quantification;
             type.origin = origin;
             type.aliasSymbol = aliasSymbol;
             type.aliasTypeArguments = aliasTypeArguments;
@@ -16674,20 +16686,20 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         return type;
     }
 
-    function getTypeFromUnionTypeNode(node: UnionTypeNode): Type {
+    function getTypeFromUnionTypeNode(node: UnionTypeNode | ExistentiallyQuantifiedUnionTypeNode, quantification: Quantification): Type {
         const links = getNodeLinks(node);
         if (!links.resolvedType) {
             const aliasSymbol = getAliasSymbolForTypeNode(node);
-            links.resolvedType = getUnionType(map(node.types, getTypeFromTypeNode), UnionReduction.Literal,
+            links.resolvedType = getUnionType(map(node.types, getTypeFromTypeNode), UnionReduction.Literal, quantification,
                 aliasSymbol, getTypeArgumentsForAliasSymbol(aliasSymbol));
         }
         return links.resolvedType;
     }
 
-    function addTypeToIntersection(typeSet: Map<string, Type>, includes: TypeFlags, type: Type) {
+    function addTypeToIntersection(typeSet: Map<string, Type>, includes: TypeFlags, type: Type, quantification: Quantification) {
         const flags = type.flags;
-        if (flags & TypeFlags.Intersection) {
-            return addTypesToIntersection(typeSet, includes, (type as IntersectionType).types);
+        if (flags & TypeFlags.Intersection && (type as IntersectionType).quantification === quantification) {
+            return addTypesToIntersection(typeSet, includes, (type as IntersectionType).types, quantification);
         }
         if (isEmptyAnonymousObjectType(type)) {
             if (!(includes & TypeFlags.IncludesEmptyObject)) {
@@ -16720,9 +16732,9 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
 
     // Add the given types to the given type set. Order is preserved, freshness is removed from literal
     // types, duplicates are removed, and nested types of the given kind are flattened into the set.
-    function addTypesToIntersection(typeSet: Map<string, Type>, includes: TypeFlags, types: readonly Type[]) {
+    function addTypesToIntersection(typeSet: Map<string, Type>, includes: TypeFlags, types: readonly Type[], quantification: Quantification) {
         for (const type of types) {
-            includes = addTypeToIntersection(typeSet, includes, getRegularTypeOfLiteralType(type));
+            includes = addTypeToIntersection(typeSet, includes, getRegularTypeOfLiteralType(type), quantification);
         }
         return includes;
     }
@@ -16797,9 +16809,9 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
     // If the given list of types contains more than one union of primitive types, replace the
     // first with a union containing an intersection of those primitive types, then remove the
     // other unions and return true. Otherwise, do nothing and return false.
-    function intersectUnionsOfPrimitiveTypes(types: Type[]) {
+    function intersectUnionsOfPrimitiveTypes(types: Type[], quantification: Quantification) {
         let unionTypes: UnionType[] | undefined;
-        const index = findIndex(types, t => !!(getObjectFlags(t) & ObjectFlags.PrimitiveUnion));
+        const index = findIndex(types, t => !!(getObjectFlags(t) & ObjectFlags.PrimitiveUnion && (t as UnionType).quantification === quantification));
         if (index < 0) {
             return false;
         }
@@ -16808,7 +16820,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         // the unionTypes array.
         while (i < types.length) {
             const t = types[i];
-            if (getObjectFlags(t) & ObjectFlags.PrimitiveUnion) {
+            if (getObjectFlags(t) & ObjectFlags.PrimitiveUnion && (t as UnionType).quantification === quantification) {
                 (unionTypes || (unionTypes = [types[index] as UnionType])).push(t as UnionType);
                 orderedRemoveItemAt(types, i);
             }
@@ -16835,14 +16847,15 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             }
         }
         // Finally replace the first union with the result
-        types[index] = getUnionTypeFromSortedList(result, ObjectFlags.PrimitiveUnion);
+        types[index] = getUnionTypeFromSortedList(result, quantification, ObjectFlags.PrimitiveUnion);
         return true;
     }
 
-    function createIntersectionType(types: Type[], aliasSymbol?: Symbol, aliasTypeArguments?: readonly Type[]) {
+    function createIntersectionType(types: Type[], quantification: Quantification = Quantification.Universal, aliasSymbol?: Symbol, aliasTypeArguments?: readonly Type[]) {
         const result = createType(TypeFlags.Intersection) as IntersectionType;
         result.objectFlags = getPropagatingFlagsOfTypes(types, /*excludeKinds*/ TypeFlags.Nullable);
         result.types = types;
+        result.quantification = quantification;
         result.aliasSymbol = aliasSymbol;
         result.aliasTypeArguments = aliasTypeArguments;
         return result;
@@ -16858,9 +16871,9 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
     // a type alias of the form "type List<T> = T & { next: List<T> }" cannot be reduced during its declaration.
     // Also, unlike union types, the order of the constituent types is preserved in order that overload resolution
     // for intersections of types with signatures can be deterministic.
-    function getIntersectionType(types: readonly Type[], aliasSymbol?: Symbol, aliasTypeArguments?: readonly Type[], noSupertypeReduction?: boolean): Type {
+    function getIntersectionType(types: readonly Type[], quantification: Quantification = Quantification.Universal, aliasSymbol?: Symbol, aliasTypeArguments?: readonly Type[], noSupertypeReduction?: boolean): Type {
         const typeMembershipMap: Map<string, Type> = new Map();
-        const includes = addTypesToIntersection(typeMembershipMap, 0 as TypeFlags, types);
+        const includes = addTypesToIntersection(typeMembershipMap, 0 as TypeFlags, types, quantification);
         const typeSet: Type[] = arrayFrom(typeMembershipMap.values());
         // An intersection type is considered empty if it contains
         // the type never, or
@@ -16909,54 +16922,55 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         if (typeSet.length === 1) {
             return typeSet[0];
         }
-        const id = getTypeListId(typeSet) + getAliasId(aliasSymbol, aliasTypeArguments);
+        const quantificationKey = quantification === Quantification.Universal ? "∀" : "∃";
+        const id = quantificationKey + getTypeListId(typeSet) + getAliasId(aliasSymbol, aliasTypeArguments);
         let result = intersectionTypes.get(id);
         if (!result) {
             if (includes & TypeFlags.Union) {
-                if (intersectUnionsOfPrimitiveTypes(typeSet)) {
+                if (intersectUnionsOfPrimitiveTypes(typeSet, quantification)) {
                     // When the intersection creates a reduced set (which might mean that *all* union types have
                     // disappeared), we restart the operation to get a new set of combined flags. Once we have
                     // reduced we'll never reduce again, so this occurs at most once.
-                    result = getIntersectionType(typeSet, aliasSymbol, aliasTypeArguments);
+                    result = getIntersectionType(typeSet, quantification, aliasSymbol, aliasTypeArguments);
                 }
-                else if (every(typeSet, t => !!(t.flags & TypeFlags.Union && (t as UnionType).types[0].flags & TypeFlags.Undefined))) {
+                else if (every(typeSet, t => !!(t.flags & TypeFlags.Union && (t as UnionType).quantification === quantification && (t as UnionType).types[0].flags & TypeFlags.Undefined))) {
                     const containedUndefinedType = some(typeSet, containsMissingType) ? missingType : undefinedType;
                     removeFromEach(typeSet, TypeFlags.Undefined);
-                    result = getUnionType([getIntersectionType(typeSet), containedUndefinedType], UnionReduction.Literal, aliasSymbol, aliasTypeArguments);
+                    result = getUnionType([getIntersectionType(typeSet, quantification), containedUndefinedType], UnionReduction.Literal, quantification, aliasSymbol, aliasTypeArguments);
                 }
-                else if (every(typeSet, t => !!(t.flags & TypeFlags.Union && ((t as UnionType).types[0].flags & TypeFlags.Null || (t as UnionType).types[1].flags & TypeFlags.Null)))) {
+                else if (every(typeSet, t => !!(t.flags & TypeFlags.Union && (t as UnionType).quantification === quantification && ((t as UnionType).types[0].flags & TypeFlags.Null || (t as UnionType).types[1].flags & TypeFlags.Null)))) {
                     removeFromEach(typeSet, TypeFlags.Null);
-                    result = getUnionType([getIntersectionType(typeSet), nullType], UnionReduction.Literal, aliasSymbol, aliasTypeArguments);
+                    result = getUnionType([getIntersectionType(typeSet, quantification), nullType], UnionReduction.Literal, quantification, aliasSymbol, aliasTypeArguments);
                 }
                 else {
                     // We are attempting to construct a type of the form X & (A | B) & (C | D). Transform this into a type of
                     // the form X & A & C | X & A & D | X & B & C | X & B & D. If the estimated size of the resulting union type
                     // exceeds 100000 constituents, report an error.
-                    if (!checkCrossProductUnion(typeSet)) {
+                    if (!checkCrossProductUnion(typeSet, quantification)) {
                         return errorType;
                     }
-                    const constituents = getCrossProductIntersections(typeSet);
+                    const constituents = getCrossProductIntersections(typeSet, quantification);
                     // We attach a denormalized origin type when at least one constituent of the cross-product union is an
                     // intersection (i.e. when the intersection didn't just reduce one or more unions to smaller unions) and
                     // the denormalized origin has fewer constituents than the union itself.
-                    const origin = some(constituents, t => !!(t.flags & TypeFlags.Intersection)) && getConstituentCountOfTypes(constituents) > getConstituentCountOfTypes(typeSet) ? createOriginUnionOrIntersectionType(TypeFlags.Intersection, typeSet) : undefined;
-                    result = getUnionType(constituents, UnionReduction.Literal, aliasSymbol, aliasTypeArguments, origin);
+                    const origin = some(constituents, t => !!(t.flags & TypeFlags.Intersection && (t as IntersectionType).quantification === quantification)) && getConstituentCountOfTypes(constituents) > getConstituentCountOfTypes(typeSet) ? createOriginUnionOrIntersectionType(TypeFlags.Intersection, typeSet, quantification) : undefined;
+                    result = getUnionType(constituents, UnionReduction.Literal, quantification, aliasSymbol, aliasTypeArguments, origin);
                 }
             }
             else {
-                result = createIntersectionType(typeSet, aliasSymbol, aliasTypeArguments);
+                result = createIntersectionType(typeSet, quantification, aliasSymbol, aliasTypeArguments);
             }
             intersectionTypes.set(id, result);
         }
         return result;
     }
 
-    function getCrossProductUnionSize(types: readonly Type[]) {
-        return reduceLeft(types, (n, t) => t.flags & TypeFlags.Union ? n * (t as UnionType).types.length : t.flags & TypeFlags.Never ? 0 : n, 1);
+    function getCrossProductUnionSize(types: readonly Type[], quantification: Quantification) {
+        return reduceLeft(types, (n, t) => t.flags & TypeFlags.Union && (t as UnionType).quantification === quantification ? n * (t as UnionType).types.length : t.flags & TypeFlags.Never ? 0 : n, 1);
     }
 
-    function checkCrossProductUnion(types: readonly Type[]) {
-        const size = getCrossProductUnionSize(types);
+    function checkCrossProductUnion(types: readonly Type[], quantification: Quantification) {
+        const size = getCrossProductUnionSize(types, quantification);
         if (size >= 100000) {
             tracing?.instant(tracing.Phase.CheckTypes, "checkCrossProductUnion_DepthLimit", { typeIds: types.map(t => t.id), size });
             error(currentNode, Diagnostics.Expression_produces_a_union_type_that_is_too_complex_to_represent);
@@ -16965,21 +16979,21 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         return true;
     }
 
-    function getCrossProductIntersections(types: readonly Type[]) {
-        const count = getCrossProductUnionSize(types);
+    function getCrossProductIntersections(types: readonly Type[], quantification: Quantification) {
+        const count = getCrossProductUnionSize(types, quantification);
         const intersections: Type[] = [];
         for (let i = 0; i < count; i++) {
             const constituents = types.slice();
             let n = i;
             for (let j = types.length - 1; j >= 0; j--) {
-                if (types[j].flags & TypeFlags.Union) {
+                if (types[j].flags & TypeFlags.Union && (types[j] as UnionType).quantification === quantification) {
                     const sourceTypes = (types[j] as UnionType).types;
                     const length = sourceTypes.length;
                     constituents[j] = sourceTypes[n % length];
                     n = Math.floor(n / length);
                 }
             }
-            const t = getIntersectionType(constituents);
+            const t = getIntersectionType(constituents, quantification);
             if (!(t.flags & TypeFlags.Never)) intersections.push(t);
         }
         return intersections;
@@ -16999,13 +17013,13 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         return !!(t1.flags & (TypeFlags.String | TypeFlags.Number | TypeFlags.BigInt)) && t2 === emptyTypeLiteralType;
     }
 
-    function getTypeFromIntersectionTypeNode(node: IntersectionTypeNode): Type {
+    function getTypeFromIntersectionTypeNode(node: IntersectionTypeNode | ExistentiallyQuantifiedIntersectionTypeNode, quantification: Quantification): Type {
         const links = getNodeLinks(node);
         if (!links.resolvedType) {
             const aliasSymbol = getAliasSymbolForTypeNode(node);
             const types = map(node.types, getTypeFromTypeNode);
             const noSupertypeReduction = types.length === 2 && (areIntersectedTypesAvoidingPrimitiveReduction(types[0], types[1]) || areIntersectedTypesAvoidingPrimitiveReduction(types[1], types[0]));
-            links.resolvedType = getIntersectionType(types, aliasSymbol, getTypeArgumentsForAliasSymbol(aliasSymbol), noSupertypeReduction);
+            links.resolvedType = getIntersectionType(types, quantification, aliasSymbol, getTypeArgumentsForAliasSymbol(aliasSymbol), noSupertypeReduction);
         }
         return links.resolvedType;
     }
@@ -17158,7 +17172,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         const propertyTypes = map(getPropertiesOfType(type), prop => getLiteralTypeFromProperty(prop, include));
         const indexKeyTypes = map(getIndexInfosOfType(type), info => info !== enumNumberIndexInfo && isKeyTypeIncluded(info.keyType, include) ?
             info.keyType === stringType && include & TypeFlags.Number ? stringOrNumberType : info.keyType : neverType);
-        return getUnionType(concatenate(propertyTypes, indexKeyTypes), UnionReduction.Literal,
+        return getUnionType(concatenate(propertyTypes, indexKeyTypes), UnionReduction.Literal, Quantification.Universal,
             /*aliasSymbol*/ undefined, /*aliasTypeArguments*/ undefined, origin);
     }
 
@@ -17248,9 +17262,9 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
     }
 
     function getTemplateLiteralType(texts: readonly string[], types: readonly Type[]): Type {
-        const unionIndex = findIndex(types, t => !!(t.flags & (TypeFlags.Never | TypeFlags.Union)));
+        const unionIndex = findIndex(types, t => !!(t.flags & TypeFlags.Never) || (!!(t.flags & TypeFlags.Union) && (t as UnionType).quantification === Quantification.Universal));
         if (unionIndex >= 0) {
-            return checkCrossProductUnion(types) ?
+            return checkCrossProductUnion(types, Quantification.Universal) ?
                 mapType(types[unionIndex], t => getTemplateLiteralType(texts, replaceElement(types, unionIndex, t))) :
                 errorType;
         }
@@ -17886,8 +17900,8 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 return undefined;
             }
             return accessFlags & AccessFlags.Writing
-                ? getIntersectionType(propTypes, aliasSymbol, aliasTypeArguments)
-                : getUnionType(propTypes, UnionReduction.Literal, aliasSymbol, aliasTypeArguments);
+                ? getIntersectionType(propTypes, (indexType as UnionType).quantification, aliasSymbol, aliasTypeArguments)
+                : getUnionType(propTypes, UnionReduction.Literal, (indexType as UnionType).quantification, aliasSymbol, aliasTypeArguments);
         }
         return getPropertyTypeForIndexType(objectType, apparentObjectType, indexType, indexType, accessNode, accessFlags | AccessFlags.CacheSymbol | AccessFlags.ReportDeprecated);
     }
@@ -18347,13 +18361,13 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         }
         left = tryMergeUnionOfObjectTypeAndEmptyObject(left, readonly);
         if (left.flags & TypeFlags.Union) {
-            return checkCrossProductUnion([left, right])
+            return checkCrossProductUnion([left, right], (left as UnionType).quantification)
                 ? mapType(left, t => getSpreadType(t, right, symbol, objectFlags, readonly))
                 : errorType;
         }
         right = tryMergeUnionOfObjectTypeAndEmptyObject(right, readonly);
         if (right.flags & TypeFlags.Union) {
-            return checkCrossProductUnion([left, right])
+            return checkCrossProductUnion([left, right], (right as UnionType).quantification)
                 ? mapType(right, t => getSpreadType(left, t, symbol, objectFlags, readonly))
                 : errorType;
         }
@@ -18655,10 +18669,14 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 return getTypeFromArrayOrTupleTypeNode(node as ArrayTypeNode | TupleTypeNode);
             case SyntaxKind.OptionalType:
                 return getTypeFromOptionalTypeNode(node as OptionalTypeNode);
+            case SyntaxKind.ExistentiallyQuantifiedUnionType:
+                return getTypeFromUnionTypeNode(node as ExistentiallyQuantifiedUnionTypeNode, Quantification.Existential);
+            case SyntaxKind.ExistentiallyQuantifiedIntersectionType:
+                return getTypeFromIntersectionTypeNode(node as ExistentiallyQuantifiedIntersectionTypeNode, Quantification.Existential);
             case SyntaxKind.UnionType:
-                return getTypeFromUnionTypeNode(node as UnionTypeNode);
+                return getTypeFromUnionTypeNode(node as UnionTypeNode, Quantification.Universal);
             case SyntaxKind.IntersectionType:
-                return getTypeFromIntersectionTypeNode(node as IntersectionTypeNode);
+                return getTypeFromIntersectionTypeNode(node as IntersectionTypeNode, Quantification.Universal);
             case SyntaxKind.JSDocNullableType:
                 return getTypeFromJSDocNullableTypeNode(node as JSDocNullableType);
             case SyntaxKind.JSDocOptionalType:
@@ -19225,8 +19243,8 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             const newAliasSymbol = aliasSymbol || type.aliasSymbol;
             const newAliasTypeArguments = aliasSymbol ? aliasTypeArguments : instantiateTypes(type.aliasTypeArguments, mapper);
             return flags & TypeFlags.Intersection || origin && origin.flags & TypeFlags.Intersection ?
-                getIntersectionType(newTypes, newAliasSymbol, newAliasTypeArguments) :
-                getUnionType(newTypes, UnionReduction.Literal, newAliasSymbol, newAliasTypeArguments);
+                getIntersectionType(newTypes, (type as IntersectionType).quantification, newAliasSymbol, newAliasTypeArguments) :
+                getUnionType(newTypes, UnionReduction.Literal, (type as UnionType).quantification, newAliasSymbol, newAliasTypeArguments);
         }
         if (flags & TypeFlags.OneOf) {
             return getOneOfType(instantiateType((type as OneOfType).origin, mapper));
@@ -24685,15 +24703,16 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
     }
 
     function getTypeFromInference(inference: InferenceInfo) {
-        if (inference.candidates) {
-            const candidateUnions = [...inference.candidates.values()].map(t => inference.isOneOfArgument ? getCommonSupertype(t) : getOneOfType(getUnionType(t, UnionReduction.Subtype)));
-            return inference.isAllOfArgument ? getCommonSupertype(candidateUnions) : getUnionType(candidateUnions, UnionReduction.Subtype);
-        }
-        if (inference.contraCandidates) {
-            const candidateIntersections = [...inference.contraCandidates.values()].map(t => inference.isOneOfArgument ? getCommonSubtype(t) : getIntersectionType(t));
-            return inference.isAllOfArgument ? getCommonSubtype(candidateIntersections) : getIntersectionType(candidateIntersections);
-        }
-        return undefined
+        // if (inference.candidates) {
+        //     const candidateUnions = [...inference.candidates.values()].map(t => inference.isOneOfArgument ? getCommonSupertype(t) : getOneOfType(getUnionType(t, UnionReduction.Subtype)));
+        //     return inference.isAllOfArgument ? getCommonSupertype(candidateUnions) : getUnionType(candidateUnions, UnionReduction.Subtype);
+        // }
+        // if (inference.contraCandidates) {
+        //     const candidateIntersections = [...inference.contraCandidates.values()].map(t => inference.isOneOfArgument ? getCommonSubtype(t) : getIntersectionType(t));
+        //     return inference.isAllOfArgument ? getCommonSubtype(candidateIntersections) : getIntersectionType(candidateIntersections);
+        // }
+        return undefined;
+    }
 
     function hasSkipDirectInferenceFlag(node: Node) {
         return !!getNodeLinks(node).skipDirectInference;
@@ -26600,17 +26619,17 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                 // Otherwise, if we have exactly one type left in the origin set, return that as the filtered type.
                 // Otherwise, construct a new filtered origin type.
                 const originTypes = (origin as UnionType).types;
-                const originFiltered = filter(originTypes, t => !!(t.flags & TypeFlags.Union) || f(t));
+                const originFiltered = filter(originTypes, t => (!!(t.flags & TypeFlags.Union) && (t as UnionType).quantification === (origin as UnionType).quantification) || f(t));
                 if (originTypes.length - originFiltered.length === types.length - filtered.length) {
                     if (originFiltered.length === 1) {
                         return originFiltered[0];
                     }
-                    newOrigin = createOriginUnionOrIntersectionType(TypeFlags.Union, originFiltered);
+                    newOrigin = createOriginUnionOrIntersectionType(TypeFlags.Union, originFiltered, (origin as UnionType).quantification);
                 }
             }
             // filtering could remove intersections so `ContainsIntersections` might be forwarded "incorrectly"
             // it is purely an optimization hint so there is no harm in accidentally forwarding it
-            return getUnionTypeFromSortedList(filtered, (type as UnionType).objectFlags & (ObjectFlags.PrimitiveUnion | ObjectFlags.ContainsIntersections), /*aliasSymbol*/ undefined, /*aliasTypeArguments*/ undefined, newOrigin);
+            return getUnionTypeFromSortedList(filtered, (type as UnionType).quantification, (type as UnionType).objectFlags & (ObjectFlags.PrimitiveUnion | ObjectFlags.ContainsIntersections), /*aliasSymbol*/ undefined, /*aliasTypeArguments*/ undefined, newOrigin);
         }
         return type.flags & TypeFlags.Never || f(type) ? type : neverType;
     }
@@ -26640,7 +26659,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         let mappedTypes: Type[] | undefined;
         let changed = false;
         for (const t of types) {
-            const mapped = t.flags & TypeFlags.Union ? mapType(t, mapper, noReductions) : mapper(t);
+            const mapped = t.flags & TypeFlags.Union && (t as UnionType).quantification === (type as UnionType).quantification ? mapType(t, mapper, noReductions) : mapper(t);
             changed ||= t !== mapped;
             if (mapped) {
                 if (!mappedTypes) {
@@ -26656,7 +26675,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
 
     function mapTypeWithAlias(type: Type, mapper: (t: Type) => Type, aliasSymbol: Symbol | undefined, aliasTypeArguments: readonly Type[] | undefined) {
         return type.flags & TypeFlags.Union && aliasSymbol ?
-            getUnionType(map((type as UnionType).types, mapper), UnionReduction.Literal, aliasSymbol, aliasTypeArguments) :
+            getUnionType(map((type as UnionType).types, mapper), UnionReduction.Literal, (type as UnionType).quantification, aliasSymbol, aliasTypeArguments) :
             mapType(type, mapper);
     }
 

@@ -78,6 +78,8 @@ import {
     EnumDeclaration,
     EnumMember,
     ExclamationToken,
+    ExistentiallyQuantifiedIntersectionTypeNode,
+    ExistentiallyQuantifiedUnionTypeNode,
     ExportAssignment,
     ExportDeclaration,
     ExportSpecifier,
@@ -678,6 +680,8 @@ const forEachChildTable: ForEachChildTable = {
     [SyntaxKind.TupleType]: function forEachChildInTupleType<T>(node: TupleTypeNode, cbNode: (node: Node) => T | undefined, cbNodes?: (nodes: NodeArray<Node>) => T | undefined): T | undefined {
         return visitNodes(cbNode, cbNodes, node.elements);
     },
+    [SyntaxKind.ExistentiallyQuantifiedUnionType]: forEachChildInUnionOrIntersectionType,
+    [SyntaxKind.ExistentiallyQuantifiedIntersectionType]: forEachChildInUnionOrIntersectionType,
     [SyntaxKind.UnionType]: forEachChildInUnionOrIntersectionType,
     [SyntaxKind.IntersectionType]: forEachChildInUnionOrIntersectionType,
     [SyntaxKind.ConditionalType]: function forEachChildInConditionalType<T>(node: ConditionalTypeNode, cbNode: (node: Node) => T | undefined, _cbNodes?: (nodes: NodeArray<Node>) => T | undefined): T | undefined {
@@ -1138,7 +1142,7 @@ function forEachChildInCallOrConstructSignature<T>(node: CallSignatureDeclaratio
         visitNode(cbNode, node.type);
 }
 
-function forEachChildInUnionOrIntersectionType<T>(node: UnionTypeNode | IntersectionTypeNode, cbNode: (node: Node) => T | undefined, cbNodes?: (nodes: NodeArray<Node>) => T | undefined): T | undefined {
+function forEachChildInUnionOrIntersectionType<T>(node: ExistentiallyQuantifiedUnionTypeNode | ExistentiallyQuantifiedIntersectionTypeNode | UnionTypeNode | IntersectionTypeNode, cbNode: (node: Node) => T | undefined, cbNodes?: (nodes: NodeArray<Node>) => T | undefined): T | undefined {
     return visitNodes(cbNode, cbNodes, node.types);
 }
 
@@ -4718,7 +4722,7 @@ namespace Parser {
     }
 
     function parseUnionOrIntersectionType(
-        operator: SyntaxKind.BarToken | SyntaxKind.AmpersandToken,
+        operator: SyntaxKind.BarBarToken | SyntaxKind.AmpersandAmpersandToken | SyntaxKind.BarToken | SyntaxKind.AmpersandToken,
         parseConstituentType: () => TypeNode,
         createTypeNode: (types: NodeArray<TypeNode>) => UnionOrIntersectionTypeNode
     ): TypeNode {
@@ -4743,6 +4747,14 @@ namespace Parser {
 
     function parseUnionTypeOrHigher(): TypeNode {
         return parseUnionOrIntersectionType(SyntaxKind.BarToken, parseIntersectionTypeOrHigher, factory.createUnionTypeNode);
+    }
+
+    function parseExistentiallyQuantifiedIntersectionTypeOrHigher(): TypeNode {
+        return parseUnionOrIntersectionType(SyntaxKind.AmpersandAmpersandToken, parseUnionTypeOrHigher, factory.createExistentiallyQuantifiedIntersectionTypeNode);
+    }
+
+    function parseExistentiallyQuantifiedUnionTypeOrHigher(): TypeNode {
+        return parseUnionOrIntersectionType(SyntaxKind.BarBarToken, parseExistentiallyQuantifiedIntersectionTypeOrHigher, factory.createExistentiallyQuantifiedUnionTypeNode);
     }
 
     function nextTokenIsNewKeyword(): boolean {
@@ -4844,7 +4856,7 @@ namespace Parser {
             return parseFunctionOrConstructorType();
         }
         const pos = getNodePos();
-        const type = parseUnionTypeOrHigher();
+        const type = parseExistentiallyQuantifiedUnionTypeOrHigher();
         if (!inDisallowConditionalTypesContext() && !scanner.hasPrecedingLineBreak() && parseOptional(SyntaxKind.ExtendsKeyword)) {
             // The type following 'extends' is not permitted to be another conditional type
             const extendsType = disallowConditionalTypesAnd(parseType);

@@ -817,6 +817,16 @@ const visitEachChildTable: VisitEachChildTable = {
             Debug.checkDefined(nodeVisitor(node.type, visitor, isTypeNode)));
     },
 
+    [SyntaxKind.ExistentiallyQuantifiedUnionType]: function visitEachChildOfExistentiallyQuantifiedUnionTypeNode(node, visitor, context, nodesVisitor, _nodeVisitor, _tokenVisitor) {
+        return context.factory.updateExistentiallyQuantifiedUnionTypeNode(node,
+            nodesVisitor(node.types, visitor, isTypeNode));
+    },
+
+    [SyntaxKind.ExistentiallyQuantifiedIntersectionType]: function visitEachChildOfExistentiallyQuantifiedIntersectionTypeNode(node, visitor, context, nodesVisitor, _nodeVisitor, _tokenVisitor) {
+        return context.factory.updateExistentiallyQuantifiedIntersectionTypeNode(node,
+            nodesVisitor(node.types, visitor, isTypeNode));
+    },
+
     [SyntaxKind.UnionType]: function visitEachChildOfUnionTypeNode(node, visitor, context, nodesVisitor, _nodeVisitor, _tokenVisitor) {
         return context.factory.updateUnionTypeNode(node,
             nodesVisitor(node.types, visitor, isTypeNode));

@@ -257,6 +257,8 @@ export const enum SyntaxKind {
     TupleType,
     OptionalType,
     RestType,
+    ExistentiallyQuantifiedUnionType,
+    ExistentiallyQuantifiedIntersectionType,
     UnionType,
     IntersectionType,
     ConditionalType,
@@ -720,6 +722,8 @@ export type TypeNodeSyntaxKind =
     | SyntaxKind.NamedTupleMember
     | SyntaxKind.OptionalType
     | SyntaxKind.RestType
+    | SyntaxKind.ExistentiallyQuantifiedUnionType
+    | SyntaxKind.ExistentiallyQuantifiedIntersectionType
     | SyntaxKind.UnionType
     | SyntaxKind.IntersectionType
     | SyntaxKind.ConditionalType
@@ -1087,6 +1091,8 @@ export type HasChildren =
     | TupleTypeNode
     | OptionalTypeNode
     | RestTypeNode
+    | ExistentiallyQuantifiedUnionTypeNode
+    | ExistentiallyQuantifiedIntersectionTypeNode
     | UnionTypeNode
     | IntersectionTypeNode
     | ConditionalTypeNode
@@ -2298,7 +2304,17 @@ export interface RestTypeNode extends TypeNode {
     readonly type: TypeNode;
 }
 
-export type UnionOrIntersectionTypeNode = UnionTypeNode | IntersectionTypeNode;
+export type UnionOrIntersectionTypeNode = ExistentiallyQuantifiedUnionTypeNode | ExistentiallyQuantifiedIntersectionTypeNode | UnionTypeNode | IntersectionTypeNode;
+
+export interface ExistentiallyQuantifiedUnionTypeNode extends TypeNode {
+    readonly kind: SyntaxKind.ExistentiallyQuantifiedUnionType;
+    readonly types: NodeArray<TypeNode>;
+}
+
+export interface ExistentiallyQuantifiedIntersectionTypeNode extends TypeNode {
+    readonly kind: SyntaxKind.ExistentiallyQuantifiedIntersectionType;
+    readonly types: NodeArray<TypeNode>;
+}
 
 export interface UnionTypeNode extends TypeNode {
     readonly kind: SyntaxKind.UnionType;
@@ -6466,8 +6482,14 @@ export interface TupleTypeReference extends TypeReference {
     target: TupleType;
 }
 
+export const enum Quantification {
+    Universal,
+    Existential,
+}
+
 export interface UnionOrIntersectionType extends Type {
     types: Type[];                    // Constituent types
+    quantification: Quantification;
     /** @internal */
     objectFlags: ObjectFlags;
     /** @internal */
@@ -8252,6 +8274,10 @@ export interface ParenthesizerRules {
     parenthesizeElementTypesOfTupleType(types: readonly (TypeNode | NamedTupleMember)[]): NodeArray<TypeNode>;
     parenthesizeElementTypeOfTupleType(type: TypeNode | NamedTupleMember): TypeNode | NamedTupleMember;
     parenthesizeTypeOfOptionalType(type: TypeNode): TypeNode;
+    parenthesizeConstituentTypeOfExistentiallyQuantifiedUnionType(type: TypeNode): TypeNode;
+    parenthesizeConstituentTypesOfExistentiallyQuantifiedUnionType(constituents: readonly TypeNode[]): NodeArray<TypeNode>;
+    parenthesizeConstituentTypeOfExistentiallyQuantifiedIntersectionType(type: TypeNode): TypeNode;
+    parenthesizeConstituentTypesOfExistentiallyQuantifiedIntersectionType(constituents: readonly TypeNode[]): NodeArray<TypeNode>;
     parenthesizeConstituentTypeOfUnionType(type: TypeNode): TypeNode;
     parenthesizeConstituentTypesOfUnionType(constituents: readonly TypeNode[]): NodeArray<TypeNode>;
     parenthesizeConstituentTypeOfIntersectionType(type: TypeNode): TypeNode;
@@ -8451,6 +8477,10 @@ export interface NodeFactory {
     updateOptionalTypeNode(node: OptionalTypeNode, type: TypeNode): OptionalTypeNode;
     createRestTypeNode(type: TypeNode): RestTypeNode;
     updateRestTypeNode(node: RestTypeNode, type: TypeNode): RestTypeNode;
+    createExistentiallyQuantifiedUnionTypeNode(types: readonly TypeNode[]): ExistentiallyQuantifiedUnionTypeNode;
+    updateExistentiallyQuantifiedUnionTypeNode(node: ExistentiallyQuantifiedUnionTypeNode, types: NodeArray<TypeNode>): ExistentiallyQuantifiedUnionTypeNode;
+    createExistentiallyQuantifiedIntersectionTypeNode(types: readonly TypeNode[]): ExistentiallyQuantifiedIntersectionTypeNode;
+    updateExistentiallyQuantifiedIntersectionTypeNode(node: ExistentiallyQuantifiedIntersectionTypeNode, types: NodeArray<TypeNode>): ExistentiallyQuantifiedIntersectionTypeNode;
     createUnionTypeNode(types: readonly TypeNode[]): UnionTypeNode;
     updateUnionTypeNode(node: UnionTypeNode, types: NodeArray<TypeNode>): UnionTypeNode;
     createIntersectionTypeNode(types: readonly TypeNode[]): IntersectionTypeNode;
@@ -9736,44 +9766,46 @@ export const enum ListFormat {
     None = 0,
 
     // Line separators
-    SingleLine = 0,                 // Prints the list on a single line (default).
-    MultiLine = 1 << 0,             // Prints the list on multiple lines.
-    PreserveLines = 1 << 1,         // Prints the list using line preservation if possible.
+    SingleLine = 0,                       // Prints the list on a single line (default).
+    MultiLine = 1 << 0,                   // Prints the list on multiple lines.
+    PreserveLines = 1 << 1,               // Prints the list using line preservation if possible.
     LinesMask = SingleLine | MultiLine | PreserveLines,
 
     // Delimiters
-    NotDelimited = 0,               // There is no delimiter between list items (default).
-    BarDelimited = 1 << 2,          // Each list item is space-and-bar (" |") delimited.
-    AmpersandDelimited = 1 << 3,    // Each list item is space-and-ampersand (" &") delimited.
-    CommaDelimited = 1 << 4,        // Each list item is comma (",") delimited.
-    AsteriskDelimited = 1 << 5,     // Each list item is asterisk ("\n *") delimited, used with JSDoc.
-    DelimitersMask = BarDelimited | AmpersandDelimited | CommaDelimited | AsteriskDelimited,
+    NotDelimited = 0,                     // There is no delimiter between list items (default).
+    BarBarDelimited = 1 << 2,             // Each list item is space-and-bar-bar (" ||") delimited.
+    AmpersandAmpersandDelimited = 1 << 3, // Each list item is space-and-ampersand-ampersand (" &&") delimited.
+    BarDelimited = 1 << 4,                // Each list item is space-and-bar (" |") delimited.
+    AmpersandDelimited = 1 << 5,          // Each list item is space-and-ampersand (" &") delimited.
+    CommaDelimited = 1 << 6,              // Each list item is comma (",") delimited.
+    AsteriskDelimited = 1 << 7,           // Each list item is asterisk ("\n *") delimited, used with JSDoc.
+    DelimitersMask = BarBarDelimited | AmpersandAmpersandDelimited | BarDelimited | AmpersandDelimited | CommaDelimited | AsteriskDelimited,
 
-    AllowTrailingComma = 1 << 6,    // Write a trailing comma (",") if present.
+    AllowTrailingComma = 1 << 8,          // Write a trailing comma (",") if present.
 
     // Whitespace
-    Indented = 1 << 7,              // The list should be indented.
-    SpaceBetweenBraces = 1 << 8,    // Inserts a space after the opening brace and before the closing brace.
-    SpaceBetweenSiblings = 1 << 9,  // Inserts a space between each sibling node.
+    Indented = 1 << 9,                    // The list should be indented.
+    SpaceBetweenBraces = 1 << 10,         // Inserts a space after the opening brace and before the closing brace.
+    SpaceBetweenSiblings = 1 << 11,       // Inserts a space between each sibling node.
 
     // Brackets/Braces
-    Braces = 1 << 10,                // The list is surrounded by "{" and "}".
-    Parenthesis = 1 << 11,          // The list is surrounded by "(" and ")".
-    AngleBrackets = 1 << 12,        // The list is surrounded by "<" and ">".
-    SquareBrackets = 1 << 13,       // The list is surrounded by "[" and "]".
+    Braces = 1 << 12,                     // The list is surrounded by "{" and "}".
+    Parenthesis = 1 << 13,                // The list is surrounded by "(" and ")".
+    AngleBrackets = 1 << 14,              // The list is surrounded by "<" and ">".
+    SquareBrackets = 1 << 15,             // The list is surrounded by "[" and "]".
     BracketsMask = Braces | Parenthesis | AngleBrackets | SquareBrackets,
 
-    OptionalIfUndefined = 1 << 14,  // Do not emit brackets if the list is undefined.
-    OptionalIfEmpty = 1 << 15,      // Do not emit brackets if the list is empty.
+    OptionalIfUndefined = 1 << 16,        // Do not emit brackets if the list is undefined.
+    OptionalIfEmpty = 1 << 17,            // Do not emit brackets if the list is empty.
     Optional = OptionalIfUndefined | OptionalIfEmpty,
 
     // Other
-    PreferNewLine = 1 << 16,        // Prefer adding a LineTerminator between synthesized nodes.
-    NoTrailingNewLine = 1 << 17,    // Do not emit a trailing NewLine for a MultiLine list.
-    NoInterveningComments = 1 << 18, // Do not emit comments between each node
-    NoSpaceIfEmpty = 1 << 19,       // If the literal is empty, do not add spaces between braces.
-    SingleElement = 1 << 20,
-    SpaceAfterList = 1 << 21,       // Add space after list
+    PreferNewLine = 1 << 18,              // Prefer adding a LineTerminator between synthesized nodes.
+    NoTrailingNewLine = 1 << 19,          // Do not emit a trailing NewLine for a MultiLine list.
+    NoInterveningComments = 1 << 20,      // Do not emit comments between each node
+    NoSpaceIfEmpty = 1 << 21,             // If the literal is empty, do not add spaces between braces.
+    SingleElement = 1 << 22,
+    SpaceAfterList = 1 << 23,             // Add space after list
 
     // Precomputed Formats
     Modifiers = SingleLine | SpaceBetweenSiblings | NoInterveningComments | SpaceAfterList,
@@ -9783,6 +9815,8 @@ export const enum ListFormat {
 
     SingleLineTupleTypeElements = CommaDelimited | SpaceBetweenSiblings | SingleLine,
     MultiLineTupleTypeElements = CommaDelimited | Indented | SpaceBetweenSiblings | MultiLine,
+    ExistentiallyQuantifiedUnionTypeConstituents = BarBarDelimited | SpaceBetweenSiblings | SingleLine,
+    ExistentiallyQuantifiedIntersectionTypeConstituents = AmpersandAmpersandDelimited | SpaceBetweenSiblings | SingleLine,
     UnionTypeConstituents = BarDelimited | SpaceBetweenSiblings | SingleLine,
     IntersectionTypeConstituents = AmpersandDelimited | SpaceBetweenSiblings | SingleLine,
     ObjectBindingPatternElements = SingleLine | AllowTrailingComma | SpaceBetweenBraces | CommaDelimited | SpaceBetweenSiblings | NoSpaceIfEmpty,

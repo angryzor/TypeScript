@@ -100,6 +100,8 @@ import {
     escapeNonAsciiString,
     escapeString,
     every,
+    ExistentiallyQuantifiedIntersectionTypeNode,
+    ExistentiallyQuantifiedUnionTypeNode,
     ExportAssignment,
     ExportDeclaration,
     ExportSpecifier,
@@ -1908,6 +1910,10 @@ export function createPrinter(printerOptions: PrinterOptions = {}, handlers: Pri
                 case SyntaxKind.OptionalType:
                     return emitOptionalType(node as OptionalTypeNode);
                 // SyntaxKind.RestType is handled below
+                case SyntaxKind.ExistentiallyQuantifiedUnionType:
+                    return emitExistentiallyQuantifiedUnionType(node as ExistentiallyQuantifiedUnionTypeNode);
+                case SyntaxKind.ExistentiallyQuantifiedIntersectionType:
+                    return emitExistentiallyQuantifiedIntersectionType(node as ExistentiallyQuantifiedIntersectionTypeNode);
                 case SyntaxKind.UnionType:
                     return emitUnionType(node as UnionTypeNode);
                 case SyntaxKind.IntersectionType:
@@ -2808,6 +2814,14 @@ export function createPrinter(printerOptions: PrinterOptions = {}, handlers: Pri
     function emitOptionalType(node: OptionalTypeNode) {
         emit(node.type, parenthesizer.parenthesizeTypeOfOptionalType);
         writePunctuation("?");
+    }
+
+    function emitExistentiallyQuantifiedUnionType(node: ExistentiallyQuantifiedUnionTypeNode) {
+        emitList(node, node.types, ListFormat.ExistentiallyQuantifiedUnionTypeConstituents, parenthesizer.parenthesizeConstituentTypeOfExistentiallyQuantifiedUnionType);
+    }
+
+    function emitExistentiallyQuantifiedIntersectionType(node: ExistentiallyQuantifiedIntersectionTypeNode) {
+        emitList(node, node.types, ListFormat.ExistentiallyQuantifiedIntersectionTypeConstituents, parenthesizer.parenthesizeConstituentTypeOfExistentiallyQuantifiedIntersectionType);
     }
 
     function emitUnionType(node: UnionTypeNode) {
@@ -4947,6 +4961,14 @@ export function createPrinter(printerOptions: PrinterOptions = {}, handlers: Pri
                 break;
             case ListFormat.CommaDelimited:
                 writePunctuation(",");
+                break;
+            case ListFormat.BarBarDelimited:
+                writeSpace();
+                writePunctuation("||");
+                break;
+            case ListFormat.AmpersandAmpersandDelimited:
+                writeSpace();
+                writePunctuation("&&");
                 break;
             case ListFormat.BarDelimited:
                 writeSpace();

@@ -78,6 +78,10 @@ export function createParenthesizerRules(factory: NodeFactory): ParenthesizerRul
         parenthesizeConciseBodyOfArrowFunction,
         parenthesizeCheckTypeOfConditionalType,
         parenthesizeExtendsTypeOfConditionalType,
+        parenthesizeConstituentTypesOfExistentiallyQuantifiedUnionType,
+        parenthesizeConstituentTypeOfExistentiallyQuantifiedUnionType,
+        parenthesizeConstituentTypesOfExistentiallyQuantifiedIntersectionType,
+        parenthesizeConstituentTypeOfExistentiallyQuantifiedIntersectionType,
         parenthesizeConstituentTypesOfUnionType,
         parenthesizeConstituentTypeOfUnionType,
         parenthesizeConstituentTypesOfIntersectionType,
@@ -480,6 +484,46 @@ export function createParenthesizerRules(factory: NodeFactory): ParenthesizerRul
         return extendsType;
     }
 
+    // ExistentiallyQuantifiedUnionType[Extends] :
+    //     `||`? IntersectionType[?Extends]
+    //     ExistentiallyQuantifiedUnionType[?Extends] `||` IntersectionType[?Extends]
+    //
+    // - A union type constituent has the same precedence as the check type of a conditional type
+    function parenthesizeConstituentTypeOfExistentiallyQuantifiedUnionType(type: TypeNode) {
+        switch (type.kind) {
+            case SyntaxKind.ExistentiallyQuantifiedUnionType: // Not strictly necessary, but a union containing a union should have been flattened
+            case SyntaxKind.ExistentiallyQuantifiedIntersectionType: // Not strictly necessary, but makes generated output more readable and avoids breaks in DT tests
+            case SyntaxKind.UnionType: // Not strictly necessary, but makes generated output more readable and avoids breaks in DT tests
+            case SyntaxKind.IntersectionType: // Not strictly necessary, but makes generated output more readable and avoids breaks in DT tests
+                return factory.createParenthesizedType(type);
+        }
+        return parenthesizeCheckTypeOfConditionalType(type);
+    }
+
+    function parenthesizeConstituentTypesOfExistentiallyQuantifiedUnionType(members: readonly TypeNode[]): NodeArray<TypeNode> {
+        return factory.createNodeArray(sameMap(members, parenthesizeConstituentTypeOfExistentiallyQuantifiedUnionType));
+    }
+
+    // ExistentiallyQuantifiedIntersectionType[Extends] :
+    //     `&&`? TypeOperator[?Extends]
+    //     ExistentiallyQuantifiedIntersectionType[?Extends] `&&` TypeOperator[?Extends]
+    //
+    // - An intersection type constituent does not allow function, constructor, conditional, or union types (they must be parenthesized)
+    function parenthesizeConstituentTypeOfExistentiallyQuantifiedIntersectionType(type: TypeNode) {
+        switch (type.kind) {
+            case SyntaxKind.ExistentiallyQuantifiedUnionType:
+            case SyntaxKind.ExistentiallyQuantifiedIntersectionType: // Not strictly necessary, but an intersection containing an intersection should have been flattened
+            case SyntaxKind.UnionType: // Not strictly necessary, but makes generated output more readable and avoids breaks in DT tests
+            case SyntaxKind.IntersectionType: // Not strictly necessary, but makes generated output more readable and avoids breaks in DT tests
+                return factory.createParenthesizedType(type);
+        }
+        return parenthesizeConstituentTypeOfExistentiallyQuantifiedUnionType(type);
+    }
+
+    function parenthesizeConstituentTypesOfExistentiallyQuantifiedIntersectionType(members: readonly TypeNode[]): NodeArray<TypeNode> {
+        return factory.createNodeArray(sameMap(members, parenthesizeConstituentTypeOfExistentiallyQuantifiedIntersectionType));
+    }
+
     // UnionType[Extends] :
     //     `|`? IntersectionType[?Extends]
     //     UnionType[?Extends] `|` IntersectionType[?Extends]
@@ -487,11 +531,13 @@ export function createParenthesizerRules(factory: NodeFactory): ParenthesizerRul
     // - A union type constituent has the same precedence as the check type of a conditional type
     function parenthesizeConstituentTypeOfUnionType(type: TypeNode) {
         switch (type.kind) {
+            case SyntaxKind.ExistentiallyQuantifiedUnionType:
+            case SyntaxKind.ExistentiallyQuantifiedIntersectionType:
             case SyntaxKind.UnionType: // Not strictly necessary, but a union containing a union should have been flattened
             case SyntaxKind.IntersectionType: // Not strictly necessary, but makes generated output more readable and avoids breaks in DT tests
                 return factory.createParenthesizedType(type);
         }
-        return parenthesizeCheckTypeOfConditionalType(type);
+        return parenthesizeConstituentTypeOfExistentiallyQuantifiedIntersectionType(type);
     }
 
     function parenthesizeConstituentTypesOfUnionType(members: readonly TypeNode[]): NodeArray<TypeNode> {
@@ -505,6 +551,8 @@ export function createParenthesizerRules(factory: NodeFactory): ParenthesizerRul
     // - An intersection type constituent does not allow function, constructor, conditional, or union types (they must be parenthesized)
     function parenthesizeConstituentTypeOfIntersectionType(type: TypeNode) {
         switch (type.kind) {
+            case SyntaxKind.ExistentiallyQuantifiedUnionType:
+            case SyntaxKind.ExistentiallyQuantifiedIntersectionType:
             case SyntaxKind.UnionType:
             case SyntaxKind.IntersectionType: // Not strictly necessary, but an intersection containing an intersection should have been flattened
                 return factory.createParenthesizedType(type);
@@ -673,6 +721,10 @@ export const nullParenthesizerRules: ParenthesizerRules = {
     parenthesizeConciseBodyOfArrowFunction: identity,
     parenthesizeCheckTypeOfConditionalType: identity,
     parenthesizeExtendsTypeOfConditionalType: identity,
+    parenthesizeConstituentTypesOfExistentiallyQuantifiedUnionType: nodes => cast(nodes, isNodeArray),
+    parenthesizeConstituentTypeOfExistentiallyQuantifiedUnionType: identity,
+    parenthesizeConstituentTypesOfExistentiallyQuantifiedIntersectionType: nodes => cast(nodes, isNodeArray),
+    parenthesizeConstituentTypeOfExistentiallyQuantifiedIntersectionType: identity,
     parenthesizeConstituentTypesOfUnionType: nodes => cast(nodes, isNodeArray),
     parenthesizeConstituentTypeOfUnionType: identity,
     parenthesizeConstituentTypesOfIntersectionType: nodes => cast(nodes, isNodeArray),
