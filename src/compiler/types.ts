@@ -914,32 +914,37 @@ export const enum RelationComparisonResult {
 }
 
 /** @internal */
-export type OneOfEnvironment = Map<OneOfType, AllOfType>;
+export type ExistentialEnvironment<E extends ExistentialType> = Map<E, AllOfType>;
 
 /** @internal */
-export interface OneOfContext {
-    iterationContext?: OneOfIterationContext;
+export interface ExistentialContext<E extends ExistentialType> {
+    iterationContext?: ExistentialIterationContext<E>;
 }
 
 /** @internal */
-export interface OneOfIterationContext {
-    context: OneOfContext;
+export interface BundledExistentialContext {
+    unionContext: ExistentialContext<UnionType>;
+    intersectionContext: ExistentialContext<IntersectionType>;
+}
+
+/** @internal */
+export interface ExistentialCache {
+    unions?: ExistentialEnvironment<UnionType>;
+    intersections?: ExistentialEnvironment<IntersectionType>;
+}
+
+/** @internal */
+export interface ExistentialIterationContext<E extends ExistentialType> {
+    context: ExistentialContext<E>;
     allOfType: AllOfType;
-    environment: OneOfEnvironment;
-    mappedOneOfs: Set<OneOfType>;
-    mapper: OneOfInstantiationMap;
-    mappers: OneOfInstantiationMap[];
+    environment: ExistentialEnvironment<E>;
+    mappedExistentials: Set<E>;
+    mapper: ExistentialInstantiationMap;
+    mappers: ExistentialInstantiationMap[];
 }
 
 /** @internal */
-export type OneOfInstantiationMap = TypeMapper | undefined;
-
-/** @internal */
-export interface RelationEntry {
-    result: RelationComparisonResult
-    sourceOneOfEnvironment?: OneOfEnvironment
-    targetOneOfEnvironment?: OneOfEnvironment
-}
+export type ExistentialInstantiationMap = TypeMapper | undefined;
 
 /** @internal */
 export type NodeId = number;
@@ -6231,6 +6236,8 @@ export interface Type {
     immediateBaseConstraint?: Type;  // Immediate base constraint cache
     /** @internal */
     widened?: Type; // Cached widened form of the type
+    /** @internal */
+    allOfType?: Type;                // Cached `allof` wrapper for this type
 }
 
 /** @internal */
@@ -6375,6 +6382,7 @@ export interface ObjectType extends Type {
     /** @internal */ constructSignatures?: readonly Signature[]; // Construct signatures of type
     /** @internal */ indexInfos?: readonly IndexInfo[];  // Index signatures
     /** @internal */ objectTypeWithoutAbstractConstructSignatures?: ObjectType;
+    /** @internal */ knownExistentials: ExistentialCache;
 }
 
 /** Class and interface types (ObjectFlags.Class and ObjectFlags.Interface). */
@@ -6487,6 +6495,11 @@ export const enum Quantification {
     Existential,
 }
 
+export interface IterableWithUnionOrIntersectionSemantics {
+    flags: TypeFlags.Union | TypeFlags.Intersection;
+    types: Iterable<Type>;
+}
+
 export interface UnionOrIntersectionType extends Type {
     types: Type[];                    // Constituent types
     quantification: Quantification;
@@ -6536,6 +6549,8 @@ export interface AllOfType extends Type {
     origin: Type;
     objectFlags: ObjectFlags;
 }
+
+export type ExistentialType = UnionType | IntersectionType
 
 export type StructuredType = ObjectType | UnionType | IntersectionType | OneOfType | AllOfType;
 
