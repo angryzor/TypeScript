@@ -172,6 +172,7 @@ import {
     ExistentialEnvironment,
     ExistentialInstantiationMap,
     ExistentialIterationContext,
+    ExistentialIterationType,
     ExistentiallyQuantifiedIntersectionTypeNode,
     ExistentiallyQuantifiedUnionTypeNode,
     ExistentialType,
@@ -438,6 +439,7 @@ import {
     InterfaceType,
     InterfaceTypeWithDeclaredMembers,
     InternalSymbolName,
+    IntersectionOfType,
     IntersectionType,
     IntersectionTypeNode,
     intrinsicTagNameToString,
@@ -1059,6 +1061,7 @@ import {
     TypeReferenceType,
     TypeVariable,
     unescapeLeadingUnderscores,
+    UnionOfType,
     UnionOrIntersectionType,
     UnionOrIntersectionTypeNode,
     UnionReduction,
@@ -2023,8 +2026,8 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
     var markerSubTypeForCheck = createTypeParameter();
     markerSubTypeForCheck.constraint = markerSuperTypeForCheck;
 
-    var freeAllOfType = createAllOfType(neverType);
-    var freeWithConflictsAllOfType = createAllOfType(neverType);
+    var freeExistentialIterationType = getExistentialIterationType(TypeFlags.ExistentialIteration, neverType);
+    var freeWithConflictsExistentialIterationType = getExistentialIterationType(TypeFlags.ExistentialIteration, neverType);
 
     var noTypePredicate = createTypePredicate(TypePredicateKind.Identifier, "<<unresolved>>", 0, anyType);
 
@@ -16522,6 +16525,10 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         }
     }
 
+    function isExistentiallyQuantifiedType(type: Type, flags = TypeFlags.UnionOrIntersection) {
+        return type.flags & flags && (type as ExistentialType).quantification === Quantification.Existential;
+    }
+
     function createOriginUnionOrIntersectionType(flags: TypeFlags, types: Type[], quantification: Quantification) {
         const result = createOriginType(flags) as UnionOrIntersectionType;
         result.types = types;
@@ -17024,6 +17031,20 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             links.resolvedType = getIntersectionType(types, quantification, aliasSymbol, getTypeArgumentsForAliasSymbol(aliasSymbol), noSupertypeReduction);
         }
         return links.resolvedType;
+    }
+
+    function getExistentialIterationType(flags: TypeFlags, type: Type) {
+        const result = createOriginType(flags) as ExistentialIterationType;
+        result.type = type;
+        return result;
+    }
+
+    function getUnionOfType(type: Type) {
+        return getExistentialIterationType(TypeFlags.UnionOf, type) as UnionOfType;
+    }
+
+    function getIntersectionOfType(type: Type) {
+        return getExistentialIterationType(TypeFlags.IntersectionOf, type) as IntersectionOfType;
     }
 
     function createAllOfType(origin: Type) {
@@ -19497,7 +19518,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
     function checkTypeRelatedToAndOptionallyElaborate(
         source: Type,
         target: Type,
-        relation: Map<string, RelationEntry>,
+        relation: Map<string, RelationComparisonResult>,
         errorNode: Node | undefined,
         expr: Expression | undefined,
         headMessage: DiagnosticMessage | undefined,
@@ -19519,7 +19540,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         node: Expression | undefined,
         source: Type,
         target: Type,
-        relation: Map<string, RelationEntry>,
+        relation: Map<string, RelationComparisonResult>,
         headMessage: DiagnosticMessage | undefined,
         containingMessageChain: (() => DiagnosticMessageChain | undefined) | undefined,
         errorOutputContainer: { errors?: Diagnostic[], skipLogging?: boolean } | undefined
@@ -19556,7 +19577,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         node: Expression,
         source: Type,
         target: Type,
-        relation: Map<string, RelationEntry>,
+        relation: Map<string, RelationComparisonResult>,
         headMessage: DiagnosticMessage | undefined,
         containingMessageChain: (() => DiagnosticMessageChain | undefined) | undefined,
         errorOutputContainer: { errors?: Diagnostic[], skipLogging?: boolean } | undefined
@@ -19585,7 +19606,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         node: ArrowFunction,
         source: Type,
         target: Type,
-        relation: Map<string, RelationEntry>,
+        relation: Map<string, RelationComparisonResult>,
         containingMessageChain: (() => DiagnosticMessageChain | undefined) | undefined,
         errorOutputContainer: { errors?: Diagnostic[], skipLogging?: boolean } | undefined
     ): boolean {
@@ -19669,7 +19690,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         iterator: ElaborationIterator,
         source: Type,
         target: Type,
-        relation: Map<string, RelationEntry>,
+        relation: Map<string, RelationComparisonResult>,
         containingMessageChain: (() => DiagnosticMessageChain | undefined) | undefined,
         errorOutputContainer: { errors?: Diagnostic[], skipLogging?: boolean } | undefined
     ) {
@@ -19746,7 +19767,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         iterator: ElaborationIterator,
         source: Type,
         target: Type,
-        relation: Map<string, RelationEntry>,
+        relation: Map<string, RelationComparisonResult>,
         containingMessageChain: (() => DiagnosticMessageChain | undefined) | undefined,
         errorOutputContainer: { errors?: Diagnostic[], skipLogging?: boolean } | undefined
     ) {
@@ -19849,7 +19870,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         node: JsxAttributes,
         source: Type,
         target: Type,
-        relation: Map<string, RelationEntry>,
+        relation: Map<string, RelationComparisonResult>,
         containingMessageChain: (() => DiagnosticMessageChain | undefined) | undefined,
         errorOutputContainer: { errors?: Diagnostic[], skipLogging?: boolean } | undefined
     ) {
@@ -19960,7 +19981,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         node: ArrayLiteralExpression,
         source: Type,
         target: Type,
-        relation: Map<string, RelationEntry>,
+        relation: Map<string, RelationComparisonResult>,
         containingMessageChain: (() => DiagnosticMessageChain | undefined) | undefined,
         errorOutputContainer: { errors?: Diagnostic[], skipLogging?: boolean } | undefined
     ) {
@@ -20007,7 +20028,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         node: ObjectLiteralExpression,
         source: Type,
         target: Type,
-        relation: Map<string, RelationEntry>,
+        relation: Map<string, RelationComparisonResult>,
         containingMessageChain: (() => DiagnosticMessageChain | undefined) | undefined,
         errorOutputContainer: { errors?: Diagnostic[], skipLogging?: boolean } | undefined
     ) {
@@ -20323,7 +20344,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         return true;
     }
 
-    function isSimpleTypeRelatedTo(source: Type, target: Type, relation: Map<string, RelationEntry>, errorReporter?: ErrorReporter) {
+    function isSimpleTypeRelatedTo(source: Type, target: Type, relation: Map<string, RelationComparisonResult>, errorReporter?: ErrorReporter) {
         const s = source.flags;
         const t = target.flags;
         if (t & TypeFlags.Any || s & TypeFlags.Never || source === wildcardType) return true;
@@ -20367,7 +20388,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         return false;
     }
 
-    function isTypeRelatedTo(source: Type, target: Type, relation: Map<string, RelationEntry>) {
+    function isTypeRelatedTo(source: Type, target: Type, relation: Map<string, RelationComparisonResult>) {
         if (isFreshLiteralType(source)) {
             source = (source as FreshableType).regularType;
         }
@@ -20390,7 +20411,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         if (source.flags & TypeFlags.Object && target.flags & TypeFlags.Object) {
             const related = relation.get(getRelationKey(source, target, IntersectionState.None, relation, /*ignoreConstraints*/ false));
             if (related !== undefined) {
-                return !!(related.result & RelationComparisonResult.Succeeded);
+                return !!(related & RelationComparisonResult.Succeeded);
             }
         }
         if (source.flags & TypeFlags.StructuredOrInstantiable || target.flags & TypeFlags.StructuredOrInstantiable) {
@@ -20451,23 +20472,23 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         Debug.assertIsDefined(context.iterationContext, "popping oneof iteration context outside oneof iteration context");
 
         if (parentIterationContext) {
-            mergeExistentialEnvironments(parentIterationContext.environment, context.iterationContext.environment, context.iterationContext.allOfType);
+            mergeExistentialEnvironments(parentIterationContext.environment, context.iterationContext.environment, context.iterationContext.iterationType);
         }
 
         context.iterationContext = parentIterationContext;
     }
 
-    function isFreeAllOf(type: AllOfType) {
-        return type === freeAllOfType || type === freeWithConflictsAllOfType;
+    function isFreeExistentialIteration(type: ExistentialIterationType) {
+        return type === freeExistentialIterationType || type === freeWithConflictsExistentialIterationType;
     }
 
-    function discoverExistential<E extends ExistentialType>(environment: ExistentialEnvironment<E>, existential: E, bindingAllOf: AllOfType = freeAllOfType) {
-        environment.set(existential, !environment.has(existential) || environment.get(existential) === bindingAllOf ? bindingAllOf : freeWithConflictsAllOfType);
+    function discoverExistential<E extends ExistentialType>(environment: ExistentialEnvironment<E>, existential: E, bindingExistentialIteration: ExistentialIterationType = freeExistentialIterationType) {
+        environment.set(existential, !environment.has(existential) || environment.get(existential) === bindingExistentialIteration ? bindingExistentialIteration : freeWithConflictsExistentialIterationType);
     }
 
-    function mergeExistentialEnvironments<E extends ExistentialType>(target: ExistentialEnvironment<E>, source: ExistentialEnvironment<E>, capturingAllOf?: AllOfType) {
-        for (const [existential, bindingAllOf] of source) {
-            discoverExistential(target, existential, !isFreeAllOf(bindingAllOf) ? bindingAllOf : capturingAllOf ? capturingAllOf : bindingAllOf);
+    function mergeExistentialEnvironments<E extends ExistentialType>(target: ExistentialEnvironment<E>, source: ExistentialEnvironment<E>, capturingAllOf?: ExistentialIterationType) {
+        for (const [existential, bindingExistentialIteration] of source) {
+            discoverExistential(target, existential, !isFreeExistentialIteration(bindingExistentialIteration) ? bindingExistentialIteration : capturingAllOf ? capturingAllOf : bindingExistentialIteration);
         }
     }
 
@@ -20475,10 +20496,10 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         return mapper2 ? mergeTypeMappers(mapper1, mapper2) : mapper1;
     }
 
-    function createExistentialIterationContext<E extends ExistentialType>(context: ExistentialContext<E>, allOfType: AllOfType): ExistentialIterationContext<E> {
+    function createExistentialIterationContext<E extends ExistentialType>(context: ExistentialContext<E>, iterationType: ExistentialIterationType): ExistentialIterationContext<E> {
         return {
             context,
-            allOfType,
+            iterationType,
             environment: createExistentialEnvironment(),
             mappedExistentials: new Set<E>(),
             mapper: undefined,
@@ -20503,7 +20524,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
     }
 
     function generateExistentialTypeMappers<E extends ExistentialType>(existentials: E[]) {
-        const instantiations = cartesianProduct(existentials.map(existential => existential.origin.flags & TypeFlags.Union ? (existential.origin as UnionType).types : [existential.origin]));
+        const instantiations = cartesianProduct(existentials.map(existential => existential.types));
 
         return instantiations.map(instantiation => makeArrayTypeMapper(existentials, instantiation));
     }
@@ -20512,9 +20533,9 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         let conflictsFound = false;
         const newFreeExistentials: E[] = [];
 
-        for (const [existential, bindingAllOf] of iterationContext.environment) {
-            if (isFreeAllOf(bindingAllOf) && !iterationContext.mappedExistentials.has(existential)) {
-                conflictsFound ||= bindingAllOf === freeWithConflictsAllOfType;
+        for (const [existential, bindingExistentialIteration] of iterationContext.environment) {
+            if (isFreeExistentialIteration(bindingExistentialIteration) && !iterationContext.mappedExistentials.has(existential)) {
+                conflictsFound ||= bindingExistentialIteration === freeWithConflictsExistentialIterationType;
                 newFreeExistentials.push(existential);
             }
         }
@@ -20546,6 +20567,10 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         return iterable.mappers.pop();
     }
 
+    function createExistentialEnvironment<E extends ExistentialType>(): ExistentialEnvironment<E> {
+        return new Map<E, ExistentialIterationType>();
+    }
+
     function pushExistentialEnvironment<E extends ExistentialType>(iterationContext: ExistentialIterationContext<E>, environment: ExistentialEnvironment<E>): ExistentialEnvironment<E> {
         Debug.assertIsDefined(iterationContext, "pushing oneof environment outside oneof iteration context");
 
@@ -20567,6 +20592,13 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         iterationContext.environment = parentEnvironment;
 
         mergeExistentialEnvironment(iterationContext, environment);
+    }
+
+    function createBundledExistentialContext(): BundledExistentialContext {
+        return {
+            unionContext: createExistentialContext<UnionType>(),
+            intersectionContext: createExistentialContext<IntersectionType>(),
+        };
     }
 
     /*
@@ -20607,10 +20639,6 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         }
     }
 
-    function createExistentialEnvironment<E extends ExistentialType>(): ExistentialEnvironment<E> {
-        return new Map<E, AllOfType>();
-    }
-
     function getExistentialSubstitution<E extends ExistentialType>(iterationContext: ExistentialIterationContext<E>, existential: E) {
         let mappedType: Type;
 
@@ -20623,10 +20651,10 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         return existential.types[existential.types.length - 1];
     }
 
-    function mapExistentialInstantiationsAndFilterConflicts<E extends ExistentialType, T>(context: ExistentialContext<E>, allOfType: AllOfType = freeAllOfType, f: (mapper: ExistentialInstantiationMap) => T, rollback?: () => void): Iterable<T> {
+    function mapExistentialInstantiationsAndFilterConflicts<E extends ExistentialType, T>(context: ExistentialContext<E>, iterationType: ExistentialIterationType = freeExistentialIterationType, f: (mapper: ExistentialInstantiationMap) => T, rollback?: () => void): Iterable<T> {
         return {
             *[globalThis.Symbol.iterator]() {
-                const iterationContext = createExistentialIterationContext(context, allOfType);
+                const iterationContext = createExistentialIterationContext(context, iterationType);
 
                 for (const mapper of existentialInstantiations(iterationContext)) {
                     const result = f(mapper);
@@ -20644,10 +20672,10 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
          };
     }
 
-    function iterateExistentialInstantiations<E extends ExistentialType>(context: ExistentialContext<E>, allOfType: AllOfType = freeAllOfType, rollback?: () => void): Iterable<ExistentialInstantiationMap> {
+    function iterateExistentialInstantiations<E extends ExistentialType>(context: ExistentialContext<E>, iterationType: ExistentialIterationType = freeExistentialIterationType, rollback?: () => void): Iterable<ExistentialInstantiationMap> {
         return {
             *[globalThis.Symbol.iterator]() {
-                const iterationContext = createExistentialIterationContext(context, allOfType);
+                const iterationContext = createExistentialIterationContext(context, iterationType);
 
                 for (const mapper of existentialInstantiations(iterationContext)) {
                     yield mapper;
@@ -21481,19 +21509,19 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             }
         }
 
-        function eachExistentialInstantiationRelatedTo(context: ExistentialContext, source: Type, target: Type, reportErrors = false, intersectionState = IntersectionState.None, allOfType?: AllOfType) {
+        function existentialInstantiationRelatedTo<E extends ExistentialType>(context: ExistentialContext<E>, source: Type, target: Type, reportErrors = false, intersectionState = IntersectionState.None, iterationType?: ExistentialIterationType) {
             const saveErrorInfo = captureErrorCalculationState();
 
-            return mapExistentialInstantiationsAndFilterConflicts(context, allOfType, mapper => {
+            return mapExistentialInstantiationsAndFilterConflicts(context, iterationType, mapper => {
                 resetErrorInfo(saveErrorInfo);
                 return { related: isRelatedTo(source, target, RecursionFlags.None, reportErrors, /*headMessage*/ undefined, intersectionState), mapper };
             });
         }
 
-        function eachExistentialInstantiationRelatedToType(source: Type, target: Type, reportErrors = false, intersectionState = IntersectionState.None, allOfType?: AllOfType): Ternary {
+        function eachExistentialInstantiationRelatedToType(source: Type, target: Type, reportErrors = false, intersectionState = IntersectionState.None, iterationType?: UnionOfType): Ternary {
             let result = Ternary.True;
 
-            for (const { related, mapper } of eachExistentialInstantiationRelatedTo(sourceBundledExistentialContext.unionContext, source, target, reportErrors, intersectionState, allOfType)) {
+            for (const { related, mapper } of existentialInstantiationRelatedTo(sourceBundledExistentialContext.unionContext, source, target, reportErrors, intersectionState, iterationType)) {
                 if (!related) {
                     if (reportErrors) {
                         reportExistentialInstantiations(mapper, source);
@@ -21506,14 +21534,133 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             return result;
         }
 
-        function typeRelatedToSomeExistentialInstantiation(source: Type, target: Type, reportErrors = false, intersectionState = IntersectionState.None, allOfType?: AllOfType): Ternary {
-            for (const { related, mapper } of eachExistentialInstantiationRelatedTo(targetBundledExistentialContext.unionContext, source, target, reportErrors, intersectionState, allOfType)) {
+        function someExistentialInstantiationRelatedToType(source: Type, target: Type, reportErrors = false, intersectionState = IntersectionState.None, iterationType?: IntersectionOfType): Ternary {
+            for (const { related, mapper } of existentialInstantiationRelatedTo(sourceBundledExistentialContext.intersectionContext, source, target, reportErrors, intersectionState, iterationType)) {
                 if (related) {
                     return related;
                 }
                 if (reportErrors) {
                     reportExistentialInstantiations(mapper, target);
                 }
+            }
+
+            return Ternary.False;
+        }
+
+        function typeRelatedToSomeExistentialInstantiation(source: Type, target: Type, reportErrors = false, intersectionState = IntersectionState.None, iterationType?: UnionOfType): Ternary {
+            for (const { related, mapper } of existentialInstantiationRelatedTo(targetBundledExistentialContext.unionContext, source, target, reportErrors, intersectionState, iterationType)) {
+                if (related) {
+                    return related;
+                }
+                if (reportErrors) {
+                    reportExistentialInstantiations(mapper, target);
+                }
+            }
+
+            return Ternary.False;
+        }
+
+        function typeRelatedToEachExistentialInstantiation(source: Type, target: Type, reportErrors = false, intersectionState = IntersectionState.None, iterationType?: IntersectionOfType): Ternary {
+            let result = Ternary.True;
+
+            for (const { related, mapper } of existentialInstantiationRelatedTo(targetBundledExistentialContext.intersectionContext, source, target, reportErrors, intersectionState, iterationType)) {
+                if (!related) {
+                    if (reportErrors) {
+                        reportExistentialInstantiations(mapper, source);
+                    }
+                    return Ternary.False;
+                }
+                result &= related;
+            }
+
+            return result;
+        }
+
+        function isRelatedToExistentialIteration(source: Type, target: Type, reportErrors: boolean, intersectionState: IntersectionState): Ternary {
+            let result: Ternary;
+
+            const sourceUnionExistentialIterationContext = getCurrentExistentialIterationContext(sourceBundledExistentialContext.unionContext);
+            const sourceIntersectionExistentialIterationContext = getCurrentExistentialIterationContext(sourceBundledExistentialContext.intersectionContext);
+            const targetUnionExistentialIterationContext = getCurrentExistentialIterationContext(targetBundledExistentialContext.unionContext);
+            const targetIntersectionExistentialIterationContext = getCurrentExistentialIterationContext(targetBundledExistentialContext.intersectionContext);
+
+            if (source.flags & TypeFlags.UnionOf) {
+                result = eachExistentialInstantiationRelatedToType((source as UnionOfType).type, target, reportErrors, intersectionState, source as UnionOfType);
+                overrideNextErrorInfo += !sourceUnionExistentialIterationContext ? 1 : 0;
+                return result;
+            }
+            if (target.flags & TypeFlags.UnionOf) {
+                result = typeRelatedToSomeExistentialInstantiation(source, (target as UnionOfType).type, reportErrors, intersectionState, target as UnionOfType);
+                overrideNextErrorInfo += !targetUnionExistentialIterationContext ? 1 : 0;
+                return result;
+            }
+            if (target.flags & TypeFlags.IntersectionOf) {
+                result = typeRelatedToEachExistentialInstantiation(source, (target as IntersectionOfType).type, reportErrors, intersectionState, target as IntersectionOfType);
+                overrideNextErrorInfo += !targetIntersectionExistentialIterationContext ? 1 : 0;
+                return result;
+            }
+            if (source.flags & TypeFlags.IntersectionOf) {
+                result = someExistentialInstantiationRelatedToType((source as IntersectionOfType).type, target, reportErrors, intersectionState, source as IntersectionOfType);
+                overrideNextErrorInfo += !sourceIntersectionExistentialIterationContext ? 1 : 0;
+                return result;
+            }
+
+            return Ternary.False;
+        }
+
+        function isRelatedToExistentialInstantiation(source: Type, target: Type, reportErrors: boolean, intersectionState: IntersectionState): Ternary {
+            let result: Ternary;
+
+            const sourceUnionExistentialIterationContext = getCurrentExistentialIterationContext(sourceBundledExistentialContext.unionContext);
+            const sourceIntersectionExistentialIterationContext = getCurrentExistentialIterationContext(sourceBundledExistentialContext.intersectionContext);
+            const targetUnionExistentialIterationContext = getCurrentExistentialIterationContext(targetBundledExistentialContext.unionContext);
+            const targetIntersectionExistentialIterationContext = getCurrentExistentialIterationContext(targetBundledExistentialContext.intersectionContext);
+
+            Debug.assertIsDefined(sourceUnionExistentialIterationContext, "Top level source structured type was not wrapped in unionof.");
+            Debug.assertIsDefined(sourceIntersectionExistentialIterationContext, "Top level source structured type was not wrapped in intersectionof.");
+            Debug.assertIsDefined(targetUnionExistentialIterationContext, "Top level target structured type was not wrapped in unionof.");
+            Debug.assertIsDefined(targetIntersectionExistentialIterationContext, "Top level target structured type was not wrapped in intersectionof.");
+
+            if (isExistentiallyQuantifiedType(source, TypeFlags.Union)) {
+                return isRelatedTo(getExistentialSubstitution(sourceUnionExistentialIterationContext, source as UnionType), target, RecursionFlags.None, reportErrors, /*headMessage*/ undefined, intersectionState);
+            }
+            if (isExistentiallyQuantifiedType(target, TypeFlags.Union)) {
+                return isRelatedTo(source, getExistentialSubstitution(targetUnionExistentialIterationContext, target as UnionType), RecursionFlags.None, reportErrors, /*headMessage*/ undefined, intersectionState);
+            }
+            if (isExistentiallyQuantifiedType(source, TypeFlags.Intersection)) {
+                return isRelatedTo(getExistentialSubstitution(sourceIntersectionExistentialIterationContext, source as IntersectionType), target, RecursionFlags.None, reportErrors, /*headMessage*/ undefined, intersectionState);
+            }
+            if (isExistentiallyQuantifiedType(target, TypeFlags.Intersection)) {
+                return isRelatedTo(source, getExistentialSubstitution(targetIntersectionExistentialIterationContext, target as IntersectionType), RecursionFlags.None, reportErrors, /*headMessage*/ undefined, intersectionState);
+            }
+
+            if (source.flags & TypeFlags.IndexedAccess && isExistentiallyQuantifiedType((source as IndexedAccessType).objectType, TypeFlags.Union)) {
+                const unionType = (source as IndexedAccessType).objectType as UnionType;
+                const indexType = (source as IndexedAccessType).indexType;
+                const instantiatedIndexedAccess = getIndexedAccessType(getExistentialSubstitution(sourceUnionExistentialIterationContext, unionType), indexType);
+
+                return isRelatedTo(instantiatedIndexedAccess, target, RecursionFlags.None, reportErrors, /*headMessage*/ undefined, intersectionState);
+            }
+            if (target.flags & TypeFlags.IndexedAccess && isExistentiallyQuantifiedType((target as IndexedAccessType).objectType, TypeFlags.Union)) {
+                const unionType = (target as IndexedAccessType).objectType as UnionType;
+                const indexType = (target as IndexedAccessType).indexType;
+                const instantiatedIndexedAccess = getIndexedAccessType(getExistentialSubstitution(targetUnionExistentialIterationContext, unionType), indexType);
+
+                return isRelatedTo(source, instantiatedIndexedAccess, RecursionFlags.None, reportErrors, /*headMessage*/ undefined, intersectionState);
+            }
+            if (source.flags & TypeFlags.IndexedAccess && isExistentiallyQuantifiedType((source as IndexedAccessType).objectType, TypeFlags.Intersection)) {
+                const intersectionType = (source as IndexedAccessType).objectType as IntersectionType;
+                const indexType = (source as IndexedAccessType).indexType;
+                const instantiatedIndexedAccess = getIndexedAccessType(getExistentialSubstitution(sourceIntersectionExistentialIterationContext, intersectionType), indexType);
+
+                return isRelatedTo(instantiatedIndexedAccess, target, RecursionFlags.None, reportErrors, /*headMessage*/ undefined, intersectionState);
+            }
+            if (target.flags & TypeFlags.IndexedAccess && isExistentiallyQuantifiedType((target as IndexedAccessType).objectType, TypeFlags.Intersection)) {
+                const intersectionType = (target as IndexedAccessType).objectType as IntersectionType;
+                const indexType = (target as IndexedAccessType).indexType;
+                const instantiatedIndexedAccess = getIndexedAccessType(getExistentialSubstitution(targetIntersectionExistentialIterationContext, intersectionType), indexType);
+
+                return isRelatedTo(source, instantiatedIndexedAccess, RecursionFlags.None, reportErrors, /*headMessage*/ undefined, intersectionState);
             }
 
             return Ternary.False;
@@ -21785,44 +21932,21 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             let varianceCheckFailed = false;
             let sourceFlags = source.flags;
             const targetFlags = target.flags;
-            const sourceUnionExistentialIterationContext = getCurrentExistentialIterationContext(sourceBundledExistentialContext.unionContext);
-            const sourceIntersectionExistentialIterationContext = getCurrentExistentialIterationContext(sourceBundledExistentialContext.intersectionContext);
-            const targetUnionExistentialIterationContext = getCurrentExistentialIterationContext(targetBundledExistentialContext.unionContext);
-            const targetIntersectionExistentialIterationContext = getCurrentExistentialIterationContext(targetBundledExistentialContext.intersectionContext);
 
-            if (source.flags & TypeFlags.AllOf || !sourceUnionExistentialIterationContext) {
-                result = eachExistentialInstantiationRelatedToType((source as AllOfType).origin, target, reportErrors, intersectionState, (source as AllOfType));
-                overrideNextErrorInfo += !sourceUnionExistentialIterationContext ? 1 : 0;
-                return result;
+            if (source.flags & TypeFlags.ExistentialIteration || target.flags & TypeFlags.ExistentialIteration) {
+                return isRelatedToExistentialIteration(source, target, reportErrors, intersectionState);
             }
-            if (target.flags & TypeFlags.AllOf || !targetUnionExistentialIterationContext) {
-                result = typeRelatedToSomeExistentialInstantiation(source, (target as AllOfType).origin, reportErrors, intersectionState, (target as AllOfType));
-                overrideNextErrorInfo += !targetUnionExistentialIterationContext ? 1 : 0;
-                return result;
+            if (source.flags & TypeFlags.AllOf || !getCurrentExistentialIterationContext(sourceBundledExistentialContext.unionContext)) {
+                return isRelatedTo(getUnionOfType(getIntersectionOfType((source as AllOfType).origin)), target, RecursionFlags.None, reportErrors, /*headMessage*/ undefined, intersectionState);
             }
-
-            Debug.assertIsDefined(sourceUnionExistentialIterationContext, "Top level source structured type was not wrapped in allof.");
-            Debug.assertIsDefined(targetUnionExistentialIterationContext, "Top level target structured type was not wrapped in allof.");
-
-            if (source.flags & TypeFlags.OneOf) {
-                return isRelatedTo(getOneOfSubstitution(sourceUnionExistentialIterationContext, source as OneOfType), target, RecursionFlags.None, reportErrors, /*headMessage*/ undefined, intersectionState);
+            if (target.flags & TypeFlags.AllOf || !getCurrentExistentialIterationContext(targetBundledExistentialContext.unionContext)) {
+                return isRelatedTo(source, getUnionOfType(getIntersectionOfType((target as AllOfType).origin)), RecursionFlags.None, reportErrors, /*headMessage*/ undefined, intersectionState);
             }
-            if (target.flags & TypeFlags.OneOf) {
-                return isRelatedTo(source, getOneOfSubstitution(targetUnionExistentialIterationContext, target as OneOfType), RecursionFlags.None, reportErrors, /*headMessage*/ undefined, intersectionState);
-            }
-            if (source.flags & TypeFlags.IndexedAccess && (source as IndexedAccessType).objectType.flags & TypeFlags.OneOf) {
-                const oneOfType = (source as IndexedAccessType).objectType as OneOfType;
-                const indexType = (source as IndexedAccessType).indexType;
-                const instantiatedIndexedAccess = getIndexedAccessType(getOneOfSubstitution(sourceUnionExistentialIterationContext, oneOfType), indexType);
-
-                return isRelatedTo(instantiatedIndexedAccess, target, RecursionFlags.None, reportErrors, /*headMessage*/ undefined, intersectionState);
-            }
-            if (target.flags & TypeFlags.IndexedAccess && (target as IndexedAccessType).objectType.flags & TypeFlags.OneOf) {
-                const oneOfType = (target as IndexedAccessType).objectType as OneOfType;
-                const indexType = (target as IndexedAccessType).indexType;
-                const instantiatedIndexedAccess = getIndexedAccessType(getOneOfSubstitution(targetUnionExistentialIterationContext, oneOfType), indexType);
-
-                return isRelatedTo(source, instantiatedIndexedAccess, RecursionFlags.None, reportErrors, /*headMessage*/ undefined, intersectionState);
+            if (isExistentiallyQuantifiedType(source)
+                || isExistentiallyQuantifiedType(target)
+                || source.flags & TypeFlags.IndexedAccess && isExistentiallyQuantifiedType((source as IndexedAccessType).objectType)
+                || target.flags & TypeFlags.IndexedAccess && isExistentiallyQuantifiedType((target as IndexedAccessType).objectType)) {
+                return isRelatedToExistentialInstantiation(source, target, reportErrors, intersectionState);
             }
 
             if (relation === identityRelation) {
@@ -23416,13 +23540,13 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         const postFix = `${
             intersectionState ? ":" + intersectionState : ""
         }|${
-            sourceBundledExistentialContext.unionContext?.iterationContext && getRelationKeyTypeMapperSuffix(sourceBundledExistentialContext.unionContext.iterationContext.mapper)
+            sourceBundledExistentialContext?.unionContext?.iterationContext && getRelationKeyTypeMapperSuffix(sourceBundledExistentialContext.unionContext.iterationContext.mapper)
         }|${
-            sourceBundledExistentialContext.intersectionContext?.iterationContext && getRelationKeyTypeMapperSuffix(sourceBundledExistentialContext.intersectionContext.iterationContext.mapper)
+            sourceBundledExistentialContext?.intersectionContext?.iterationContext && getRelationKeyTypeMapperSuffix(sourceBundledExistentialContext.intersectionContext.iterationContext.mapper)
         }|${
-            targetBundledExistentialContext.unionContext?.iterationContext && getRelationKeyTypeMapperSuffix(targetBundledExistentialContext.unionContext.iterationContext.mapper)
+            targetBundledExistentialContext?.unionContext?.iterationContext && getRelationKeyTypeMapperSuffix(targetBundledExistentialContext.unionContext.iterationContext.mapper)
         }|${
-            targetBundledExistentialContext.intersectionContext?.iterationContext && getRelationKeyTypeMapperSuffix(targetBundledExistentialContext.intersectionContext.iterationContext.mapper)
+            targetBundledExistentialContext?.intersectionContext?.iterationContext && getRelationKeyTypeMapperSuffix(targetBundledExistentialContext.intersectionContext.iterationContext.mapper)
         }`;
         return isTypeReferenceWithGenericArguments(source) && isTypeReferenceWithGenericArguments(target) ?
             getGenericTypeReferenceRelationKey(source as TypeReference, target as TypeReference, postFix, ignoreConstraints) :
@@ -24917,8 +25041,8 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         let targetStack: Type[];
         let expandingFlags = ExpandingFlags.None;
         let didRootTargetAllOf = false;
-        const sourceOneOfContext = createOneOfContext();
-        const targetOneOfContext = createOneOfContext();
+        const sourceBundledExistentialContext = createBundledExistentialContext();
+        const targetBundledExistentialContext = createBundledExistentialContext();
         inferFromTypes(originalSource, originalTarget);
 
         function inferFromTypes(source: Type, target: Type): void {
@@ -24953,7 +25077,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             const targetOneOfIterationContext = getCurrentOneOfIterationContext(targetOneOfContext);
             if (!targetOneOfIterationContext && !didRootTargetAllOf) {
                 didRootTargetAllOf = true;
-                inferToMultipleTypes(source, [target], freeAllOfType);
+                inferToMultipleTypes(source, [target], freeExistentialIterationType);
                 return;
             }
             if (!sourceOneOfIterationContext) {
@@ -25195,10 +25319,10 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             priority = savePriority;
         }
 
-        function createInferenceOneOfIterationContext(context: OneOfContext, allOfType?: AllOfType, undo?: () => void) {
+        function createInferenceOneOfIterationContext(context: OneOfContext, iterationType?: AllOfType, undo?: () => void) {
             let savedInferences: InferenceInfo[];
 
-            return mapIterable(iterateOneOfInstantiations(context, allOfType, () => {
+            return mapIterable(iterateOneOfInstantiations(context, iterationType, () => {
                 inferences = savedInferences;
                 undo?.();
             }), () => {
@@ -25206,8 +25330,8 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             });
         }
 
-        function inferFromOneOfInstantiations(source: Type, target: Type, allOfType?: AllOfType) {
-            for (const _ of createInferenceOneOfIterationContext(sourceOneOfContext, allOfType)) {
+        function inferFromOneOfInstantiations(source: Type, target: Type, iterationType?: AllOfType) {
+            for (const _ of createInferenceOneOfIterationContext(sourceOneOfContext, iterationType)) {
                 inferFromTypes(source, target);
             }
         }

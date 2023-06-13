@@ -914,7 +914,7 @@ export const enum RelationComparisonResult {
 }
 
 /** @internal */
-export type ExistentialEnvironment<E extends ExistentialType> = Map<E, AllOfType>;
+export type ExistentialEnvironment<E extends ExistentialType> = Map<E, ExistentialIterationType>;
 
 /** @internal */
 export interface ExistentialContext<E extends ExistentialType> {
@@ -936,7 +936,7 @@ export interface ExistentialCache {
 /** @internal */
 export interface ExistentialIterationContext<E extends ExistentialType> {
     context: ExistentialContext<E>;
-    allOfType: AllOfType;
+    iterationType: ExistentialIterationType;
     environment: ExistentialEnvironment<E>;
     mappedExistentials: Set<E>;
     mapper: ExistentialInstantiationMap;
@@ -6151,6 +6151,8 @@ export const enum TypeFlags {
     StringMapping   = 1 << 28,  // Uppercase/Lowercase type
     OneOf           = 1 << 29,  // oneof T
     AllOf           = 1 << 30,  // allof T
+    UnionOf         = 1 << 31,  // Union-only allof
+    IntersectionOf  = 1 << 32,  // Intersection-only allof
 
     /** @internal */
     AnyOrUnknown = Any | Unknown,
@@ -6181,7 +6183,9 @@ export const enum TypeFlags {
     /** @internal */
     DisjointDomains = NonPrimitive | StringLike | NumberLike | BigIntLike | BooleanLike | ESSymbolLike | VoidLike | Null,
     UnionOrIntersection = Union | Intersection,
-    StructuredType = Object | Union | Intersection | OneOf | AllOf,
+    ExistentialIteration = UnionOf | IntersectionOf,
+    ExistentialOperator = OneOf | AllOf,
+    StructuredType = Object | UnionOrIntersection | ExistentialIteration | ExistentialOperator,
     TypeVariable = TypeParameter | IndexedAccess,
     InstantiableNonPrimitive = TypeVariable | Conditional | Substitution,
     InstantiablePrimitive = Index | TemplateLiteral | StringMapping,
@@ -6550,9 +6554,18 @@ export interface AllOfType extends Type {
     objectFlags: ObjectFlags;
 }
 
-export type ExistentialType = UnionType | IntersectionType
+export interface ExistentialIterationType extends Type {
+    type: Type;
+    objectFlags: ObjectFlags;
+}
 
-export type StructuredType = ObjectType | UnionType | IntersectionType | OneOfType | AllOfType;
+export interface UnionOfType extends ExistentialIterationType {}
+
+export interface IntersectionOfType extends ExistentialIterationType {}
+
+export type ExistentialType = UnionType | IntersectionType;
+
+export type StructuredType = ObjectType | UnionType | IntersectionType | UnionOfType | IntersectionOfType | OneOfType | AllOfType;
 
 /** @internal */
 // An instantiated anonymous type has a target and a mapper
