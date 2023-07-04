@@ -5929,6 +5929,7 @@ export interface SymbolLinks {
     tupleLabelDeclaration?: NamedTupleMember | ParameterDeclaration; // Declaration associated with the tuple's label
     accessibleChainCache?: Map<string, Symbol[] | undefined>;
     filteredIndexSymbolCache?: Map<string, Symbol> //Symbol with applicable declarations
+    referenceType?: Type;
 }
 
 /** @internal */
@@ -6521,6 +6522,10 @@ export interface UnionOrIntersectionType extends Type {
     resolvedStringIndexType: IndexType;
     /** @internal */
     resolvedBaseConstraint: Type;
+    /** @internal */
+    parentExistential?: UnionOrIntersectionType;
+    /** @internal */
+    parentMapper?: TypeMapper;
 }
 
 export interface UnionType extends UnionOrIntersectionType {
