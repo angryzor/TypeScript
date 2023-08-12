@@ -6505,6 +6505,11 @@ export interface IterableWithUnionOrIntersectionSemantics {
     types: Iterable<Type>;
 }
 
+export interface ParentExistentialMapDefinition {
+    sources: readonly Type[];
+    target: Type;
+}
+
 export interface UnionOrIntersectionType extends Type {
     types: Type[];                    // Constituent types
     quantification: Quantification;
@@ -6523,9 +6528,9 @@ export interface UnionOrIntersectionType extends Type {
     /** @internal */
     resolvedBaseConstraint: Type;
     /** @internal */
-    parentExistential?: UnionOrIntersectionType;
+    parentExistentials?: readonly UnionOrIntersectionType[];
     /** @internal */
-    parentMapper?: TypeMapper;
+    parentExistentialMap?: Map<string, Type>;
 }
 
 export interface UnionType extends UnionOrIntersectionType {

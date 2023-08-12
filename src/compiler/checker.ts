@@ -892,6 +892,7 @@ import {
     ParameterDeclaration,
     parameterIsThisKeyword,
     ParameterPropertyDeclaration,
+    ParentExistentialMapDefinition,
     ParenthesizedExpression,
     ParenthesizedTypeNode,
     parseIsolatedEntityName,
@@ -2026,8 +2027,8 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
     var markerSubTypeForCheck = createTypeParameter();
     markerSubTypeForCheck.constraint = markerSuperTypeForCheck;
 
-    var freeExistentialIterationType = getExistentialIterationType(TypeFlags.ExistentialIteration, neverType);
-    var freeWithConflictsExistentialIterationType = getExistentialIterationType(TypeFlags.ExistentialIteration, neverType);
+    var globalExistentialUnionIterationType = getExistentialIterationType(TypeFlags.Union, neverType);
+    var globalExistentialIntersectionIterationType = getExistentialIterationType(TypeFlags.Intersection, neverType);
 
     var noTypePredicate = createTypePredicate(TypePredicateKind.Identifier, "<<unresolved>>", 0, anyType);
 
@@ -13337,13 +13338,13 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             forEachMappedTypePropertyKeyTypeAndIndexSignatureKeyType(modifiersType, include, keyofStringsOnly, addMemberForKeyType);
         }
         else {
-            forEachType(getLowerBoundOfKeyType(constraintType), addMemberForKeyType);
+            forEachType(getLowerBoundOfKeyType(constraintType), addMemberForKeyType, Quantification.Universal);
         }
         setStructuredTypeMembers(type, members, emptyArray, emptyArray, indexInfos || emptyArray);
 
         function addMemberForKeyType(keyType: Type) {
             const propNameType = nameType ? instantiateType(nameType, appendTypeMapping(type.mapper, typeParameter, keyType)) : keyType;
-            forEachType(propNameType, t => addMemberForKeyTypeWorker(keyType, t));
+            forEachType(propNameType, t => addMemberForKeyTypeWorker(keyType, t), Quantification.Universal);
         }
 
         function addMemberForKeyTypeWorker(keyType: Type, propNameType: Type) {
@@ -14036,6 +14037,8 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
     function createUnionOrIntersectionProperty(containingType: UnionOrIntersectionType, name: __String, skipObjectFunctionPropertyAugment?: boolean): Symbol | undefined {
         let singleProp: Symbol | undefined;
         let propSet: Map<SymbolId, Symbol> | undefined;
+        const singlePropParents: Type[] = [];
+        let existentialParents: Map<Type, Symbol> | undefined;
         let indexTypes: Type[] | undefined;
         const isUnion = containingType.flags & TypeFlags.Union;
         // Flags we want to propagate to the result if they exist in all source symbols
@@ -14060,6 +14063,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                     }
                     if (!singleProp) {
                         singleProp = prop;
+                        singlePropParents.push(current);
                     }
                     else if (prop !== singleProp) {
                         const isInstantiation = (getTargetSymbol(prop) || prop) === (getTargetSymbol(singleProp) || singleProp);
@@ -14075,13 +14079,21 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                         else {
                             if (!propSet) {
                                 propSet = new Map<SymbolId, Symbol>();
+                                existentialParents = new Map<Type, Symbol>();
                                 propSet.set(getSymbolId(singleProp), singleProp);
+                                for (const parent of singlePropParents) {
+                                    existentialParents.set(parent, singleProp);
+                                }
                             }
                             const id = getSymbolId(prop);
                             if (!propSet.has(id)) {
                                 propSet.set(id, prop);
                             }
+                            existentialParents!.set(current, prop);
                         }
+                    }
+                    else {
+                        singlePropParents.push(current);
                     }
                     if (isUnion && isReadonlySymbol(prop)) {
                         checkFlags |= CheckFlags.Readonly;
@@ -14189,19 +14201,23 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
 
         result.declarations = declarations;
         result.links.nameType = nameType;
-        if (propTypes.length > 2) {
-            // When `propTypes` has the potential to explode in size when normalized, defer normalization until absolutely needed
-            result.links.checkFlags |= CheckFlags.DeferredType;
-            result.links.deferralParent = containingType;
-            result.links.deferralConstituents = propTypes;
-            result.links.deferralWriteConstituents = writeTypes;
-        }
-        else {
-            result.links.type = isUnion ? getUnionType(propTypes, /*unionReduction*/ undefined, Quantification.Existential) : getIntersectionType(propTypes, Quantification.Existential);
-            if (writeTypes) {
-                result.links.writeType = isUnion ? getUnionType(writeTypes) : getIntersectionType(writeTypes);
-            }
-        }
+        // if (propTypes.length > 2) {
+        //     // When `propTypes` has the potential to explode in size when normalized, defer normalization until absolutely needed
+        //     result.links.checkFlags |= CheckFlags.DeferredType;
+        //     result.links.deferralParent = containingType;
+        //     result.links.deferralConstituents = propTypes;
+        //     result.links.deferralWriteConstituents = writeTypes;
+        // }
+        // else {
+            const parentMappings = map(containingType.types, t => ({ sources: [t], target: existentialParents!.has(t) ? getTypeOfSymbol(existentialParents!.get(t)!) : neverType }));
+            result.links.type = isUnion
+                ? getUnionType(propTypes, /*unionReduction*/ undefined, Quantification.Existential, /*aliasSymbol*/ undefined, /*aliasTypeArguments*/ undefined, /*origin*/ undefined, [containingType], parentMappings)
+                : getIntersectionType(propTypes, Quantification.Existential, /*aliasSymbol*/ undefined, /*aliasTypeArguments*/ undefined, /*noSupertypeReduction*/ undefined, [containingType], parentMappings);
+
+            // if (writeTypes) {
+            //     result.links.writeType = isUnion ? getUnionType(writeTypes) : getIntersectionType(writeTypes);
+            // }
+        // }
         return result;
     }
 
@@ -15110,7 +15126,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
                                 indexInfos.push(createIndexInfo(keyType, declaration.type ? getTypeFromTypeNode(declaration.type) : anyType,
                                     hasEffectiveModifier(declaration, ModifierFlags.Readonly), declaration));
                             }
-                        });
+                        }, Quantification.Universal);
                     }
                 }
             }
@@ -15120,8 +15136,11 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
     }
 
     function isValidIndexKeyType(type: Type): boolean {
-        return !!(type.flags & (TypeFlags.String | TypeFlags.Number | TypeFlags.ESSymbol)) || isPatternLiteralType(type) ||
-            !!(type.flags & TypeFlags.Intersection) && !isGenericType(type) && some((type as IntersectionType).types, isValidIndexKeyType);
+        return everyType(type, t =>
+            isTypeUsableAsPropertyName(t) ||
+            !!(t.flags & (TypeFlags.String | TypeFlags.Number | TypeFlags.ESSymbol)) || isPatternLiteralType(t) ||
+            !!(t.flags & TypeFlags.Intersection) && !isGenericType(t) && some((t as IntersectionType).types, isValidIndexKeyType)
+        , Quantification.Existential);
     }
 
     function getConstraintDeclaration(type: TypeParameter): TypeNode | undefined {
@@ -16546,7 +16565,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             return maybeSource;
         }
 
-        const source = maybeSource as UnionOrIntersectionType
+        const source = maybeSource as UnionOrIntersectionType;
         const type = createType(source.flags) as UnionOrIntersectionType;
         type.objectFlags = source.objectFlags;
         type.types = source.types;
@@ -16567,14 +16586,25 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         return result;
     }
 
+    function getParentExistentialMapKey(sources: readonly Type[]): string {
+        return sources.map(s => s.id).join(",");
+    }
+
+    function linkExistentialType(type: UnionType, parentExistentials: readonly UnionType[], mapping: ParentExistentialMapDefinition[]): void;
+    function linkExistentialType(type: IntersectionType, parentExistentials: readonly IntersectionType[], mapping: ParentExistentialMapDefinition[]): void;
+    function linkExistentialType(type: UnionOrIntersectionType, parentExistentials: readonly UnionOrIntersectionType[], mapping: ParentExistentialMapDefinition[]): void {
+        type.parentExistentials = parentExistentials;
+        type.parentExistentialMap = new Map(mapping.map(({ sources, target }) => [getParentExistentialMapKey(sources), target]));
+    }
+
     // We sort and deduplicate the constituent types based on object identity. If the subtypeReduction
-    // flag is specified we also reduce the constituent type set to only include types that aren't subtypes
+    // flag is specified we also reduce the constituent type set to only include types that aren"t subtypes
     // of other types. Subtype reduction is expensive for large union types and is possible only when union
     // types are known not to circularly reference themselves (as is the case with union types created by
     // expression constructs such as array literals and the || and ?: operators). Named types can
     // circularly reference themselves and therefore cannot be subtype reduced during their declaration.
     // For example, "type Item = string | (() => Item" is a named type that circularly references itself.
-    function getUnionType(types: readonly Type[], unionReduction: UnionReduction = UnionReduction.Literal, quantification: Quantification = Quantification.Universal, aliasSymbol?: Symbol, aliasTypeArguments?: readonly Type[], origin?: Type): Type {
+    function getUnionType(types: readonly Type[], unionReduction: UnionReduction = UnionReduction.Literal, quantification: Quantification = Quantification.Universal, aliasSymbol?: Symbol, aliasTypeArguments?: readonly Type[], origin?: Type, parentExistentials?: readonly UnionType[], parentExistentialMap?: ParentExistentialMapDefinition[]): Type {
         if (types.length === 0) {
             return neverType;
         }
@@ -16589,16 +16619,16 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             const id = quantificationInfix + types[index].id + infix + types[1 - index].id + getAliasId(aliasSymbol, aliasTypeArguments);
             let type = unionOfUnionTypes.get(id);
             if (!type) {
-                type = getUnionTypeWorker(types, unionReduction, quantification, aliasSymbol, aliasTypeArguments, /*origin*/ undefined);
+                type = getUnionTypeWorker(types, unionReduction, quantification, aliasSymbol, aliasTypeArguments, /*origin*/ undefined, parentExistentials, parentExistentialMap);
                 unionOfUnionTypes.set(id, type);
             }
             return quantification === Quantification.Existential ? createInstanceOfExistentialPrototype(type) : type;
         }
-        const type = getUnionTypeWorker(types, unionReduction, quantification, aliasSymbol, aliasTypeArguments, origin);
+        const type = getUnionTypeWorker(types, unionReduction, quantification, aliasSymbol, aliasTypeArguments, origin, parentExistentials, parentExistentialMap);
         return quantification === Quantification.Existential ? createInstanceOfExistentialPrototype(type) : type;
     }
 
-    function getUnionTypeWorker(types: readonly Type[], unionReduction: UnionReduction, quantification: Quantification, aliasSymbol: Symbol | undefined, aliasTypeArguments: readonly Type[] | undefined, origin: Type | undefined): Type {
+    function getUnionTypeWorker(types: readonly Type[], unionReduction: UnionReduction, quantification: Quantification, aliasSymbol: Symbol | undefined, aliasTypeArguments: readonly Type[] | undefined, origin: Type | undefined, parentExistentials: readonly UnionType[] | undefined, parentExistentialMap: ParentExistentialMapDefinition[] | undefined): Type {
         let typeSet: Type[] | undefined = [];
         const includes = addTypesToUnion(typeSet, 0 as TypeFlags, types, quantification);
         if (unionReduction !== UnionReduction.None) {
@@ -16655,7 +16685,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         }
         const objectFlags = (includes & TypeFlags.NotPrimitiveUnion ? 0 : ObjectFlags.PrimitiveUnion) |
             (includes & TypeFlags.Intersection ? ObjectFlags.ContainsIntersections : 0);
-        return getUnionTypeFromSortedList(typeSet, quantification, objectFlags, aliasSymbol, aliasTypeArguments, origin);
+        return getUnionTypeFromSortedList(typeSet, quantification, objectFlags, aliasSymbol, aliasTypeArguments, origin, parentExistentials, parentExistentialMap);
     }
 
     function getUnionOrIntersectionTypePredicate(signatures: readonly Signature[], kind: TypeFlags | undefined): TypePredicate | undefined {
@@ -16696,7 +16726,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
     }
 
     // This function assumes the constituent type list is sorted and deduplicated.
-    function getUnionTypeFromSortedList(types: Type[], quantification: Quantification, precomputedObjectFlags: ObjectFlags, aliasSymbol?: Symbol, aliasTypeArguments?: readonly Type[], origin?: Type): Type {
+    function getUnionTypeFromSortedList(types: Type[], quantification: Quantification, precomputedObjectFlags: ObjectFlags, aliasSymbol?: Symbol, aliasTypeArguments?: readonly Type[], origin?: Type, parentExistentials?: readonly UnionType[], parentExistentialMap?: ParentExistentialMapDefinition[]): Type {
         if (types.length === 0) {
             return neverType;
         }
@@ -16721,6 +16751,9 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             if (types.length === 2 && types[0].flags & TypeFlags.BooleanLiteral && types[1].flags & TypeFlags.BooleanLiteral) {
                 type.flags |= TypeFlags.Boolean;
                 (type as UnionType & IntrinsicType).intrinsicName = "boolean";
+            }
+            if (parentExistentials && parentExistentialMap) {
+                linkExistentialType(type, parentExistentials, parentExistentialMap);
             }
             unionTypes.set(id, type);
         }
@@ -16915,7 +16948,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
     // a type alias of the form "type List<T> = T & { next: List<T> }" cannot be reduced during its declaration.
     // Also, unlike union types, the order of the constituent types is preserved in order that overload resolution
     // for intersections of types with signatures can be deterministic.
-    function getIntersectionType(types: readonly Type[], quantification: Quantification = Quantification.Universal, aliasSymbol?: Symbol, aliasTypeArguments?: readonly Type[], noSupertypeReduction?: boolean): Type {
+    function getIntersectionType(types: readonly Type[], quantification: Quantification = Quantification.Universal, aliasSymbol?: Symbol, aliasTypeArguments?: readonly Type[], noSupertypeReduction?: boolean, parentExistentials?: readonly UnionType[], parentExistentialMap?: ParentExistentialMapDefinition[]): Type {
         const typeMembershipMap: Map<string, Type> = new Map();
         const calculatedIncludes = addTypesToIntersection(typeMembershipMap, 0 as TypeFlags, types, quantification);
         const includes = quantification === Quantification.Existential ? 0 as TypeFlags : calculatedIncludes;
@@ -17004,6 +17037,9 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             }
             else {
                 result = createIntersectionType(typeSet, quantification, aliasSymbol, aliasTypeArguments);
+                if (parentExistentials && parentExistentialMap) {
+                    linkExistentialType(result as IntersectionType, parentExistentials, parentExistentialMap);
+                }
             }
             intersectionTypes.set(id, result);
         }
@@ -17070,7 +17106,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
     }
 
     function getExistentialIterationType(flags: TypeFlags, type: Type) {
-        const result = createOriginType(flags) as ExistentialIterationType;
+        const result = createType(flags) as ExistentialIterationType;
         result.type = type;
         return result;
     }
@@ -17934,34 +17970,75 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         // We treat boolean as different from other unions to improve errors;
         // skipping straight to getPropertyTypeForIndexType gives errors with 'boolean' instead of 'true'.
         const apparentObjectType = getReducedApparentType(objectType);
-        // Also defer indexing when the apparent object type is a oneof type.
-        if (isOneOfObjectType(objectType)) {
-            return getDeferredIndexedAccessType(objectType, indexType, accessFlags, aliasSymbol, aliasTypeArguments);
+        // // Also defer indexing when the apparent object type is a oneof type.
+        // if (isOneOfObjectType(objectType)) {
+        //     return getDeferredIndexedAccessType(objectType, indexType, accessFlags, aliasSymbol, aliasTypeArguments);
+        // }
+        // if (indexType.flags & TypeFlags.Union && !(indexType.flags & TypeFlags.Boolean)) {
+        //     const propTypes: Type[] = [];
+        //     let wasMissingProp = false;
+        //     for (const t of (indexType as UnionType).types) {
+        //         const propType = getPropertyTypeForIndexType(objectType, apparentObjectType, t, indexType, accessNode, accessFlags | (wasMissingProp ? AccessFlags.SuppressNoImplicitAnyError : 0));
+        //         if (propType) {
+        //             propTypes.push(propType);
+        //         }
+        //         else if (!accessNode) {
+        //             // If there's no error node, we can immeditely stop, since error reporting is off
+        //             return undefined;
+        //         }
+        //         else {
+        //             // Otherwise we set a flag and return at the end of the loop so we still mark all errors
+        //             wasMissingProp = true;
+        //         }
+        //     }
+        //     if (wasMissingProp) {
+        //         return undefined;
+        //     }
+        //     return accessFlags & AccessFlags.Writing
+        //         ? getIntersectionType(propTypes, (indexType as UnionType).quantification, aliasSymbol, aliasTypeArguments)
+        //         : getUnionType(propTypes, UnionReduction.Literal, (indexType as UnionType).quantification, aliasSymbol, aliasTypeArguments);
+        // }
+        const existentialContext = createExistentialContext();
+        const mappings: ParentExistentialMapDefinition[];
+
+        function getCollapsedNestedUnions(type: Type) {
+            if (!(type.flags & TypeFlags.Union)) {
+                return type;
+            }
+            if ((type as UnionType).quantification === Quantification.Existential) {
+                return getExistentialSubstitution(existentialContext, type as UnionType)
+            }
+            return mapType(type, getCollapsedNestedUnions, false, Quantification.Universal);
         }
-        if (indexType.flags & TypeFlags.Union && !(indexType.flags & TypeFlags.Boolean)) {
-            const propTypes: Type[] = [];
-            let wasMissingProp = false;
-            for (const t of (indexType as UnionType).types) {
-                const propType = getPropertyTypeForIndexType(objectType, apparentObjectType, t, indexType, accessNode, accessFlags | (wasMissingProp ? AccessFlags.SuppressNoImplicitAnyError : 0));
-                if (propType) {
-                    propTypes.push(propType);
+
+        for (const _ of iterateExistentialInstantiations(existentialContext)) {
+            if (indexType.flags & TypeFlags.UnionOrIntersection && (indexType as UnionOrIntersectionType).quantification === Quantification.Existential && !(indexType.flags & TypeFlags.Boolean)) {
+                const propTypes: Type[] = [];
+                let wasMissingProp = false;
+                for (const t of (indexType as UnionOrIntersectionType).types) {
+                    const propType = getPropertyTypeForIndexType(objectType, apparentObjectType, t, indexType, accessNode, accessFlags | (wasMissingProp ? AccessFlags.SuppressNoImplicitAnyError : 0));
+                    if (propType) {
+                        propTypes.push(propType);
+                    }
+                    else if (!accessNode) {
+                        // If there's no error node, we can immeditely stop, since error reporting is off
+                        return undefined;
+                    }
+                    else {
+                        // Otherwise we set a flag and return at the end of the loop so we still mark all errors
+                        wasMissingProp = true;
+                    }
                 }
-                else if (!accessNode) {
-                    // If there's no error node, we can immeditely stop, since error reporting is off
+                if (wasMissingProp) {
                     return undefined;
                 }
-                else {
-                    // Otherwise we set a flag and return at the end of the loop so we still mark all errors
-                    wasMissingProp = true;
-                }
+                const result = indexType.flags & TypeFlags.Intersection
+                    ? getIntersectionType(propTypes, Quantification.Existential, aliasSymbol, aliasTypeArguments)
+                    : getUnionType(propTypes, UnionReduction.Literal, Quantification.Existential, aliasSymbol, aliasTypeArguments);
+                (result as UnionOrIntersectionType).parentExistential = indexType as UnionOrIntersectionType;
+                (result as UnionOrIntersectionType).parentMapper = makeArrayTypeMapper((indexType as UnionOrIntersectionType).types, propTypes);
+                return result;
             }
-            if (wasMissingProp) {
-                return undefined;
-            }
-            return accessFlags & AccessFlags.Writing
-                ? getIntersectionType(propTypes, (indexType as UnionType).quantification, aliasSymbol, aliasTypeArguments)
-                : getUnionType(propTypes, UnionReduction.Literal, (indexType as UnionType).quantification, aliasSymbol, aliasTypeArguments);
-        }
         return getPropertyTypeForIndexType(objectType, apparentObjectType, indexType, indexType, accessNode, accessFlags | AccessFlags.CacheSymbol | AccessFlags.ReportDeprecated);
     }
 
@@ -20462,10 +20539,11 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
 
     function getNormalizedType(type: Type, writing: boolean): Type {
         while (true) {
+            // TODO: Properly handle existential unions/intersections
             const t = isFreshLiteralType(type) ? (type as FreshableType).regularType :
                 isGenericTupleType(type) ? getNormalizedTupleType(type, writing) :
                 getObjectFlags(type) & ObjectFlags.Reference ? (type as TypeReference).node ? createTypeReference((type as TypeReference).target, getTypeArguments(type as TypeReference)) : getSingleBaseForNonAugmentingSubtype(type) || type :
-                type.flags & TypeFlags.UnionOrIntersection ? getNormalizedUnionOrIntersectionType(type as UnionOrIntersectionType, writing) :
+                type.flags & TypeFlags.UnionOrIntersection && (type as UnionOrIntersectionType).quantification === Quantification.Universal ? getNormalizedUnionOrIntersectionType(type as UnionOrIntersectionType, writing) :
                 type.flags & TypeFlags.Substitution ? writing ? (type as SubstitutionType).baseType : getSubstitutionIntersection(type as SubstitutionType) :
                 type.flags & TypeFlags.Simplifiable ? getSimplifiedType(type, writing) :
                 type;
@@ -20682,8 +20760,10 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             return mappedType;
         }
 
-        if (existential.parentExistential) {
-            return getMappedType(getExistentialSubstitution(iterationContext, existential.parentExistential), existential.parentMapper!);
+        if (existential.parentExistentials) {
+            const parentSubstitutions = existential.parentExistentials.map(e => getExistentialSubstitution(iterationContext, e));
+
+            return existential.parentExistentialMap!.get(getParentExistentialMapKey(parentSubstitutions))!;
         }
 
         discoverExistential(iterationContext.environment, existential);
@@ -26814,23 +26894,23 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
     }
 
     function forEachType<T>(type: Type, f: (t: Type) => T | undefined, quantification?: Quantification): T | undefined {
-        return type.flags & TypeFlags.Union && (!quantification || (type as UnionType).quantification === quantification) ? forEach((type as UnionType).types, f) : f(type);
+        return type.flags & TypeFlags.Union && (quantification === undefined || (type as UnionType).quantification === quantification) ? forEach((type as UnionType).types, f) : f(type);
     }
 
     function someType(type: Type, f: (t: Type) => boolean, quantification?: Quantification): boolean {
-        return type.flags & TypeFlags.Union && (!quantification || (type as UnionType).quantification === quantification) ? some((type as UnionType).types, f) : f(type);
+        return type.flags & TypeFlags.Union && (quantification === undefined || (type as UnionType).quantification === quantification) ? some((type as UnionType).types, f) : f(type);
     }
 
     function everyType(type: Type, f: (t: Type) => boolean, quantification?: Quantification): boolean {
-        return type.flags & TypeFlags.Union && (!quantification || (type as UnionType).quantification === quantification) ? every((type as UnionType).types, f) : f(type);
+        return type.flags & TypeFlags.Union && (quantification === undefined || (type as UnionType).quantification === quantification) ? every((type as UnionType).types, f) : f(type);
     }
 
     function everyContainedType(type: Type, f: (t: Type) => boolean, quantification?: Quantification): boolean {
-        return type.flags & TypeFlags.UnionOrIntersection && (!quantification || (type as UnionType).quantification === quantification) ? every((type as UnionOrIntersectionType).types, f) : f(type);
+        return type.flags & TypeFlags.UnionOrIntersection && (quantification === undefined || (type as UnionType).quantification === quantification) ? every((type as UnionOrIntersectionType).types, f) : f(type);
     }
 
     function filterType(type: Type, f: (t: Type) => boolean, quantification?: Quantification): Type {
-        if (type.flags & TypeFlags.Union && (!quantification || (type as UnionType).quantification === quantification)) {
+        if (type.flags & TypeFlags.Union && (quantification === undefined || (type as UnionType).quantification === quantification)) {
             const types = (type as UnionType).types;
             const filtered = filter(types, f);
             if (filtered === types) {
@@ -26855,13 +26935,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             }
             // filtering could remove intersections so `ContainsIntersections` might be forwarded "incorrectly"
             // it is purely an optimization hint so there is no harm in accidentally forwarding it
-            const result = getUnionTypeFromSortedList(filtered, (type as UnionType).quantification, (type as UnionType).objectFlags & (ObjectFlags.PrimitiveUnion | ObjectFlags.ContainsIntersections), /*aliasSymbol*/ undefined, /*aliasTypeArguments*/ undefined, newOrigin);
-            if (result.flags & TypeFlags.Union && (type as UnionType).quantification === Quantification.Existential) {
-                const resultUnion = result as UnionType;
-                resultUnion.parentExistential = type as UnionType;
-                resultUnion.parentMapper = makeArrayTypeMapper(types, map(types, t => contains(filtered, t) ? t : neverType)); // TODO: See if we need to include these never types.
-            }
-            return result;
+            return getUnionTypeFromSortedList(filtered, (type as UnionType).quantification, (type as UnionType).objectFlags & (ObjectFlags.PrimitiveUnion | ObjectFlags.ContainsIntersections), /*aliasSymbol*/ undefined, /*aliasTypeArguments*/ undefined, newOrigin, [type as UnionType], map(types, t => ({ sources: [t], target: contains(filtered, t) ? t : neverType })));
         }
         return type.flags & TypeFlags.Never || f(type) ? type : neverType;
     }
@@ -26871,7 +26945,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
     }
 
     function countTypes(type: Type, quantification?: Quantification) {
-        return type.flags & TypeFlags.Union && (!quantification || (type as UnionType).quantification === quantification) ? (type as UnionType).types.length : 1;
+        return type.flags & TypeFlags.Union && (quantification === undefined || (type as UnionType).quantification === quantification) ? (type as UnionType).types.length : 1;
     }
 
     // Apply a mapping function to a type and return the resulting type. If the source type
@@ -26883,7 +26957,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
         if (type.flags & TypeFlags.Never) {
             return type;
         }
-        if (!(type.flags & TypeFlags.Union) || (quantification && (type as UnionType).quantification !== quantification)) {
+        if (!(type.flags & TypeFlags.Union) || (quantification !== undefined && (type as UnionType).quantification !== quantification)) {
             return mapper(type);
         }
         const origin = (type as UnionType).origin;
@@ -26906,9 +26980,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
             if (mappedTypes) {
                 const result = getUnionType(mappedTypes, noReductions ? UnionReduction.None : UnionReduction.Literal, (type as UnionType).quantification);
                 if (result.flags & TypeFlags.Union && (type as UnionType).quantification === Quantification.Existential) {
-                    const resultUnion = result as UnionType;
-                    resultUnion.parentExistential = type as UnionType;
-                    resultUnion.parentMapper = makeArrayTypeMapper(types, mappedTypes);
+                    linkExistentialType(result as UnionType, [type as UnionType], map(types, (t, i) => ({ sources: [t], target: mappedTypes[i] }))); // TODO: See if we need to include these never types.
                 }
                 return result;
             }
@@ -26917,7 +26989,7 @@ export function createTypeChecker(host: TypeCheckerHost): TypeChecker {
     }
 
     function mapTypeWithAlias(type: Type, mapper: (t: Type) => Type, aliasSymbol: Symbol | undefined, aliasTypeArguments: readonly Type[] | undefined, quantification?: Quantification) {
-        return type.flags & TypeFlags.Union && (!quantification || (type as UnionType).quantification === quantification) && aliasSymbol ?
+        return type.flags & TypeFlags.Union && (quantification === undefined || (type as UnionType).quantification === quantification) && aliasSymbol ?
             getUnionType(map((type as UnionType).types, mapper), UnionReduction.Literal, (type as UnionType).quantification, aliasSymbol, aliasTypeArguments) :
             mapType(type, mapper);
     }
